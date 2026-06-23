@@ -1,0 +1,7 @@
+# Example input for: challenge-plans weigh examples/options.yaml --sink markdown
+question: Refactor the auth module with approach A or B? Goal — minimize risk and rework.
+options:
+  - id: A
+    text: One-shot rewrite — replace the whole module at once. Clean result, but risk is concentrated and hard to roll back.
+  - id: B
+    text: Incremental migration — move endpoint by endpoint behind a flag. Slower, but every step is reversible and independently testable.

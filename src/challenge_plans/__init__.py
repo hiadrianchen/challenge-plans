@@ -1,0 +1,10 @@
+"""challenge-plans — multi-agent adversarial review & deliberation for plans/specs.
+
+Runs on the subscription CLIs already logged in on your machine (Claude Code, Codex),
+hardening a plan/spec before execution to reduce rework. Two modes: `challenge`
+(adversarial, evidence-survival) and `weigh-options` (deliberation, weighted voting).
+
+See README.md for usage and the design overview.
+"""
+
+__version__ = "0.1.0"
