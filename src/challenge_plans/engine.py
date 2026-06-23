@@ -60,7 +60,7 @@ def _parse_concerns(raw: dict, voter_id: str, nlines: int,
     for c in raw.get("concerns", []) or []:
         ftype = c.get("failure_type", "")
         span = (c.get("artifact_span") or "").strip()
-        # §9a: dropped items must be recorded in dropped_concerns, never silently continued.
+        # Panel integrity: dropped items must be recorded in dropped_concerns, never silently continued.
         if ftype not in valid_failure_types:
             dropped.append({"voter": voter_id, "reason": "failure_type_out_of_enum", "raw": c})
             continue
@@ -124,7 +124,7 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                 "preflight": {"missing_required_to_approve": []},
                 "source_diversity": {"families": 0, "voters": 0, "warning": reason}}
 
-    # §8 required_to_parse gate, locally decidable before adapter checks: empty artifact -> schema_invalid for every type.
+    # Required-to-parse gate, locally decidable before adapter checks: empty artifact -> schema_invalid for every type.
     if nlines == 0 or not body.strip():
         return _schema_invalid("empty_artifact")
     # Frontmatter consistency only applies to frontmatter artifacts such as specs; diff has no such gate.
@@ -144,7 +144,7 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
     valid_failure_types = set(rubric.failure_types)
     panel = PanelIntegrity(expected_voters=len(voters))
 
-    # §9 parallel challengers across adapters/families.
+    # Parallel challengers across adapters/families.
     def _run(adapter, persona, voter_id):
         spec = VoterSpec(voter_id=voter_id, backend=adapter.backend,
                          model_family=adapter.model_family, persona=persona)
@@ -184,12 +184,12 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
         voters_meta.append(meta)
         for c in _parse_concerns(raw, voter_id, nlines, dropped, valid_failure_types):
             existing = concerns_by_key.get(c.key)
-            # §6a dedup + §4 strictest-wins: keep the highest severity per key and merge raised_by.
+            # Dedup + strictest-wins: keep the highest severity per key and merge raised_by.
             if existing is None or severity_rank(c.severity) > severity_rank(existing.severity):
                 concerns_by_key[c.key] = c
             raised_by.setdefault(c.key, []).append(voter_id)
 
-    # §8: missing required_to_approve fields inject synthetic contract concerns.
+    # Missing required_to_approve fields inject synthetic contract concerns.
     # Only frontmatter-contract artifacts such as specs get this; diff has no such contract.
     preflight = preflight_concerns(fields, body) if rubric.frontmatter_preflight else []
     for sc in preflight:
@@ -206,7 +206,7 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                           for v in verifications)
     if verifier_broken:
         verdict = stricter_verdict(verdict, Verdict.INCONCLUSIVE)
-    # §15: a single model family is insufficient for consensus; cap verdict at discuss.
+    # A single model family is insufficient for consensus; cap verdict at discuss.
     low_diversity = len(families) <= 1
     if low_diversity:
         verdict = stricter_verdict(verdict, Verdict.DISCUSS)

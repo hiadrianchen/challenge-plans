@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from . import __version__
@@ -61,7 +62,15 @@ def _render_markdown(m: dict) -> str:
     return "\n".join(lines)
 
 
+def _apply_lang(args: argparse.Namespace) -> None:
+    # Single English-source codebase, localized output: --lang sets the env var the prompt
+    # builders read. Default "en" leaves prompts untouched.
+    if getattr(args, "lang", None):
+        os.environ["CHALLENGE_PLANS_LANG"] = args.lang
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
+    _apply_lang(args)
     if args.mode != "challenge":
         print("Deliberation runs via the `weigh` subcommand; `run --mode council` is reserved.",
               file=sys.stderr)
@@ -116,6 +125,7 @@ def _render_deliberation(m: dict) -> str:
 
 
 def _cmd_weigh(args: argparse.Namespace) -> int:
+    _apply_lang(args)
     import yaml
     try:
         with open(args.options_file, encoding="utf-8") as f:
@@ -175,6 +185,9 @@ def build_parser() -> argparse.ArgumentParser:
                      default="stdout", help="output format (github-pr-comment pending)")
     run.add_argument("--enforce", action="store_true",
                      help="map non-approve verdicts to a non-zero exit (CI gate); advisory exits 0 by default")
+    run.add_argument("--lang", default="en", metavar="LANG",
+                     help="language for human-readable output (e.g. en, zh, ja); "
+                          "JSON keys / enums / line anchors stay stable. Default en")
     run.set_defaults(func=_cmd_run)
 
     weigh = sub.add_parser("weigh", help="deliberation: multiple agents vote across options (weigh-options)")
@@ -183,6 +196,9 @@ def build_parser() -> argparse.ArgumentParser:
     weigh.add_argument("--sink", choices=["stdout", "markdown"], default="stdout")
     weigh.add_argument("--enforce", action="store_true",
                        help="exit non-zero when recommendation is discuss/inconclusive; 0 by default")
+    weigh.add_argument("--lang", default="en", metavar="LANG",
+                       help="language for human-readable output (e.g. en, zh, ja); "
+                            "JSON keys / enums stay stable. Default en")
     weigh.set_defaults(func=_cmd_weigh)
 
     doctor = sub.add_parser("doctor", help="check which backend CLIs are logged in / usable")

@@ -13,7 +13,7 @@ import concurrent.futures
 import re
 
 from .adapters import VoterSpec, strip_marker
-from .prompts import END_MARKER
+from .prompts import END_MARKER, lang_directive
 from .schema import Concern, ConcernStatus, Severity
 
 VERIFY_SEVERITIES = (Severity.CRITICAL, Severity.HIGH)
@@ -37,7 +37,7 @@ Concern: [{concern.severity.value}] {concern.title} @ {concern.artifact_span} ({
   evidence: {concern.evidence}
   failing step: {concern.concrete_failure_step}
 
-When assessment is real, reproduction **must reference a specific line such as L4, field, or step**; otherwise it is invalid verification.
+When assessment is real, reproduction **must reference a specific line such as L4, field, or step**; otherwise it is invalid verification.{lang_directive()}
 Output **exactly one JSON object** only. Do not restate examples or add extra braces. End with {END_MARKER} on its own final line:
 {{"assessment": "real|refuted|uncertain",
   "reproduction": "<if real: minimal reproducible counterexample / trigger condition>",

@@ -40,7 +40,7 @@ def mk(tmp_path, text="# spec\nL2 user export\nL3 async generation\n"):
     return str(p)
 
 
-# ── §6a concern identity ─────────────────────────────────────────────────────
+# ── concern identity ─────────────────────────────────────────────────────
 def test_canonical_key_rejects_empty_anchor():
     with pytest.raises(ValueError):
         canonical_key(artifact_span="", failure_type="x")
@@ -53,7 +53,7 @@ def test_canonical_key_deterministic_and_anchor_sensitive():
     assert k1 == k2 != k3
 
 
-# ── §4 single verdict pipeline ────────────────────────────────────────────────
+# ── single verdict pipeline ────────────────────────────────────────────────
 def test_verdict_precedence_and_verified_gating():
     hi = Concern(artifact_span="L1", failure_type="hidden_dependency", severity=Severity.HIGH)
     # Unverified high -> no hard gate; discuss.
@@ -157,7 +157,7 @@ def test_verifier_infra_failure_forces_inconclusive(tmp_path):
     assert m["verdict"] == "inconclusive"
 
 
-# ── §8 preflight ──────────────────────────────────────────────────────────────
+# ── preflight ──────────────────────────────────────────────────────────────
 def test_preflight_injects_synthetic_for_bare_spec(tmp_path):
     m = run_challenge(mk(tmp_path), "spec", "fast",
                       [MockAdapter({"mock:execution-failure": cbody([])}, "mock")])
@@ -255,7 +255,7 @@ def test_diff_no_frontmatter_preflight_injection(tmp_path):
 
 
 def test_diff_rejects_spec_failure_type_out_of_enum(tmp_path):
-    # A spec-only failure_type in a diff run is dropped out-of-enum and recorded (§9a), never silently swallowed.
+    # A spec-only failure_type in a diff run is dropped out-of-enum and recorded, never silently swallowed.
     sc = {"mock:regression": cbody([concern(span="L7-8", ft="missing_acceptance_test")])}
     m = run_challenge(dmk(tmp_path), "diff", "fast", [MockAdapter(sc, "mock")])
     assert any(d["reason"] == "failure_type_out_of_enum" for d in m["dropped_concerns"])
@@ -361,3 +361,42 @@ def test_deliberation_missing_vote_inconclusive():
 def test_weigh_options_requires_two_options():
     with pytest.raises(ValueError):
         weigh_options("?", [{"id": "A", "text": "x"}], [MockAdapter({}, "mock")])
+
+
+# ── output language (single English-source, localized prose) ──────────────────
+def test_lang_directive_default_english_is_noop(monkeypatch):
+    from challenge_plans.prompts import lang_directive
+    monkeypatch.delenv("CHALLENGE_PLANS_LANG", raising=False)
+    assert lang_directive() == ""
+    monkeypatch.setenv("CHALLENGE_PLANS_LANG", "en")
+    assert lang_directive() == ""
+
+
+def test_lang_directive_appended_but_marker_stays_last(monkeypatch):
+    # Non-English must append the prose directive WITHOUT displacing END_MARKER as the final line,
+    # otherwise the panel-integrity capture would treat the output as truncated.
+    from challenge_plans.prompts import build_challenger_prompt, lang_directive
+    from challenge_plans.verifier import build_verifier_prompt
+    from challenge_plans.deliberation import build_voter_prompt
+    monkeypatch.setenv("CHALLENGE_PLANS_LANG", "zh")
+    assert "in zh" in lang_directive()
+    c = Concern(artifact_span="L1-2", failure_type="x", severity=Severity.HIGH,
+                title="t", evidence="e", concrete_failure_step="s")
+    for prompt in (build_challenger_prompt("L1: x", "plan/spec", "lens.", ("x", "y"), 3),
+                   build_verifier_prompt("L1: x", c, "plan/spec"),
+                   build_voter_prompt("q?", [{"id": "A", "text": "a"}, {"id": "B", "text": "b"}], "l")):
+        assert "in zh" in prompt
+        assert prompt.rstrip().endswith(M)
+
+
+def test_synthetic_preflight_localizes_but_keeps_field_key(monkeypatch):
+    # Synthetic concerns never pass through a model, so --lang localizes their title/evidence in
+    # Python; the machine-readable violated_contract_field must stay the English key for dedup.
+    from challenge_plans.preflight import preflight_concerns
+    monkeypatch.setenv("CHALLENGE_PLANS_LANG", "zh")
+    by_field = {c.violated_contract_field: c for c in preflight_concerns({}, "no headings here")}
+    assert set(by_field) == {"acceptance_criteria", "non_goals"}        # keys unchanged
+    assert "验收标准" in by_field["acceptance_criteria"].title           # prose localized
+    monkeypatch.setenv("CHALLENGE_PLANS_LANG", "en")
+    en = {c.violated_contract_field: c for c in preflight_concerns({}, "no headings here")}
+    assert "Missing measurable" in en["acceptance_criteria"].title       # English fallback intact

@@ -15,7 +15,7 @@ from enum import Enum
 class Verdict(str, Enum):
     SCHEMA_INVALID = "schema_invalid"
     REQUEST_CHANGES = "request_changes"
-    INCONCLUSIVE = "inconclusive"  # Includes §9a incomplete panels; never masquerade as approve.
+    INCONCLUSIVE = "inconclusive"  # Includes incomplete panels; never masquerade as approve.
     DISCUSS = "discuss"
     APPROVE_WITH_UNVERIFIED_TIMEOUTS = "approve_with_unverified_timeouts"
     APPROVE = "approve"
@@ -58,7 +58,7 @@ class SpecFailureType(str, Enum):
     ROLLOUT_OR_OPERATIONAL_RISK = "rollout_or_operational_risk"
     SECURITY_OR_PRIVACY_BOUNDARY = "security_or_privacy_boundary"
     INTEGRATION_CONTRACT_GAP = "integration_contract_gap"
-    CONTRACT_VIOLATION = "contract_violation"  # Synthetic concern injected for §8 missing fields.
+    CONTRACT_VIOLATION = "contract_violation"  # Synthetic concern injected for missing required fields.
 
 
 # failure_type enum for diff/code changes, covering adversarial review of git diffs:
@@ -108,7 +108,7 @@ class Concern:
     trigger_condition: str = ""
     generation: int = 0            # Multi-round generation.
     parent_concern_id: str | None = None
-    synthetic: bool = False        # True = injected by §8 contract violation, not a model finding.
+    synthetic: bool = False        # True = injected by a contract violation, not a model finding.
     severity_verified: bool = False  # True only after Verifier produces concrete reproduction.
     verified_by: str = ""            # Verifier voter_id.
     verification_note: str = ""      # Reproduction/counterevidence summary.
@@ -161,7 +161,7 @@ def resolve_verdict(
 ) -> Verdict:
     """Mechanically derive one verdict from concerns plus gate signals; models do not decide.
 
-    §8 missing fields should be injected by the caller as synthetic CONTRACT_VIOLATION
+    Missing required fields should be injected by the caller as synthetic CONTRACT_VIOLATION
     concerns, so they naturally flow through this pipeline and are not handled
     separately here.
     """
@@ -175,7 +175,7 @@ def resolve_verdict(
            for c in alive):
         return Verdict.REQUEST_CHANGES
 
-    # §9a: incomplete panels never masquerade as approve; inconclusive outranks discuss.
+    # Incomplete panels never masquerade as approve; inconclusive outranks discuss.
     if panel is not None and not panel.complete:
         return Verdict.INCONCLUSIVE
 

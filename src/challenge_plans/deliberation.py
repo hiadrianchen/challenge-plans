@@ -1,7 +1,7 @@
 """Deliberation/voting engine: multiple agents vote on options,
 with model_family weight caps to prevent false consensus and an escape gate for verifiable
 blockers, which are routed into adversarial verification. Ties produce discuss + tie_breaker.
-It shares adapters, §9a integrity, and the run_manifest skeleton with challenge mode.
+It shares adapters, panel-integrity checks, and the run_manifest skeleton with challenge mode.
 
 v1 only implements stage 3, convergence voting, where options are already provided and
 closed. Stages 1 and 2, context alignment and divergent candidate generation for the full
@@ -15,7 +15,7 @@ from collections import Counter
 
 from .adapters import VoterSpec, strip_marker
 from .engine import _build_panel, _extract_json
-from .prompts import END_MARKER
+from .prompts import END_MARKER, lang_directive
 from .schema import PanelIntegrity
 
 
@@ -23,7 +23,7 @@ def build_voter_prompt(question: str, options: list[dict], lens: str) -> str:
     opts = "\n".join(f"  [{o['id']}] {o['text']}" for o in options)
     return f"""You are a voter on a deliberation panel (lens: {lens}). Below are a decision question and several options.
 Rank the options and choose a first choice based on evidence and tradeoffs. Do not hedge. If an option has a **mechanically verifiable blocker**
-(constraint violation, irreversible cost, or boundary breach), call it out separately with specific evidence; it will be removed from voting and routed to adversarial verification.
+(constraint violation, irreversible cost, or boundary breach), call it out separately with specific evidence; it will be removed from voting and routed to adversarial verification.{lang_directive()}
 
 Question: {question}
 Options:
@@ -91,7 +91,7 @@ def weigh_options(question: str, options: list[dict], adapters, profile: str = "
         meta["status"] = "ok"; voters_meta.append(meta)
         votes.append({"voter_id": voter_id, "model_family": family, **parsed})
 
-    # §3 model_family weight cap: each family totals 1.0, split across its ok votes.
+    # model_family weight cap: each family totals 1.0, split across its ok votes.
     fam_ok = Counter(v["model_family"] for v in votes)
     families = set(fam_ok)
     for v in votes:

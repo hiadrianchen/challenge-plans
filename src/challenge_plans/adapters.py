@@ -1,4 +1,4 @@
-"""Adapter layer: transport decoupling, probes, and §9a integrity capture.
+"""Adapter layer: transport decoupling, probes, and integrity capture.
 
 v0 implements ClaudeAdapter over CLI transport (subscription-based) plus MockAdapter
 for structural tests without real model calls. codex/manual_paste/browser are planned
@@ -54,7 +54,7 @@ def strip_marker(text: str) -> str:
 
 
 def check_capture(text: str, returncode: int) -> CaptureResult:
-    """§9a integrity check: non-empty and END_MARKER must be the final non-empty line by itself.
+    """Integrity check: non-empty and END_MARKER must be the final non-empty line by itself.
 
     Substring matching can be fooled when the model writes the marker inside a JSON string
     or echoes the prompt, so the final line must exactly equal the marker.
@@ -77,7 +77,7 @@ class ClaudeAdapter:
 
     def available(self) -> bool:
         # Cheap discovery during run: include it optimistically if installed; login failures
-        # are converted to capture_failed by §9a during invoke.
+        # are converted to capture_failed by the integrity check during invoke.
         return shutil.which("claude") is not None
 
     def probe(self) -> ProbeState:
@@ -97,7 +97,7 @@ class ClaudeAdapter:
         return ProbeState.READY if r.stdout.strip() else ProbeState.BILLING_UNKNOWN
 
     def invoke(self, prompt: str, spec: VoterSpec, wall_timeout: int = 150) -> CaptureResult:
-        """v0: total subprocess wall-clock timeout, not the §9 idle timeout.
+        """v0: total subprocess wall-clock timeout, not an idle timeout.
 
         Slow calls that still emit output can be killed; idle-timeout remains a known v0 gap
         Capture all stdout instead of tailing or truncating the stream.
@@ -134,7 +134,7 @@ class CodexAdapter:
         return ProbeState.READY if self.available() else ProbeState.NOT_LOGGED_IN
 
     def invoke(self, prompt: str, spec: VoterSpec, wall_timeout: int = 300) -> CaptureResult:
-        # -o writes the machine-readable final message to a file for correct §9a capture,
+        # -o writes the machine-readable final message to a file for correct integrity capture,
         # without tail truncation.
         # Medium reasoning balances speed and quality; high often exceeded 240s in practice,
         # degrading runs to a single model family.
@@ -150,7 +150,7 @@ class CodexAdapter:
             except OSError:
                 text = ""
             # If the -o file is empty, fall back to stdout; some Codex forms print the final
-            # answer there instead. The fallback still goes through §9a integrity checks and
+            # answer there instead. The fallback still goes through the integrity checks and
             # must include the marker as the final line.
             if not text.strip():
                 text = r.stdout

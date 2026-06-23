@@ -1,4 +1,4 @@
-"""Minimal §8 artifact preflight: frontmatter parsing and three-tier field grading.
+"""Minimal artifact preflight: frontmatter parsing and three-tier field grading.
 
 - Invalid required_to_parse fields such as artifact_type -> schema_invalid, with no model run.
 - Missing required_to_approve fields such as acceptance_criteria / non_goals -> inject a
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 
+from .prompts import current_lang
 from .schema import Concern, Severity
 
 try:
@@ -29,6 +30,23 @@ _REQUIRED_TO_APPROVE = {
     "acceptance_criteria": ("Missing measurable acceptance criteria; completion cannot be determined", Severity.HIGH),
     "non_goals": ("Missing explicit non-goals; scope can easily creep", Severity.MEDIUM),
 }
+# Synthetic concerns are built in Python and never pass through a model, so --lang can't localize
+# them via the prompt. Localized title/evidence live here; languages without an entry fall back to
+# the English literals above. Add a `<code>: {field: (title, evidence)}` block to localize a new one.
+_LOCALIZED_SYNTHETIC: dict[str, dict[str, tuple[str, str]]] = {
+    "zh": {
+        "acceptance_criteria": ("缺少可度量的验收标准，无法判定是否完成", "artifact 未提供 acceptance_criteria"),
+        "non_goals": ("缺少明确的非目标，范围容易蔓延", "artifact 未提供 non_goals"),
+    },
+}
+
+
+def _synthetic_text(name: str, default_title: str) -> tuple[str, str]:
+    """(title, evidence) for a synthetic concern, localized to CHALLENGE_PLANS_LANG when available."""
+    table = _LOCALIZED_SYNTHETIC.get(current_lang())
+    if table and name in table:
+        return table[name]
+    return default_title, f"artifact does not provide {name}"
 # Without frontmatter, recognize these sections only from heading lines starting with #.
 # This avoids false positives from prose such as "there are no acceptance criteria yet",
 # which would skip synthetic injection and incorrectly pass.
@@ -75,8 +93,9 @@ def preflight_concerns(fields: dict, body: str) -> list[Concern]:
     out: list[Concern] = []
     for name, (title, sev) in _REQUIRED_TO_APPROVE.items():
         if not _field_present(name, fields, body):
+            loc_title, evidence = _synthetic_text(name, title)
             out.append(Concern(
                 artifact_span="L1", failure_type="contract_violation", severity=sev,
-                title=title, violated_contract_field=name, evidence=f"artifact does not provide {name}",
+                title=loc_title, violated_contract_field=name, evidence=evidence,
                 synthetic=True, severity_verified=True, raised_by="preflight"))
     return out
