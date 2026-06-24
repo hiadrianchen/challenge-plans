@@ -510,3 +510,18 @@ def test_parser_wires_strict_and_strict_overrides_enforce():
     assert build_parser().parse_args(["run", "x.md"]).strict is False
     # strict takes precedence over enforce: a discuss verdict still fails the hard gate.
     assert _exit_code("discuss", enforce=True, strict=True) == 1
+
+
+# ── prompt-injection isolation (the artifact is untrusted input) ──
+def test_untrusted_guard_in_every_prompt():
+    from challenge_plans.prompts import UNTRUSTED_GUARD, build_challenger_prompt
+    from challenge_plans.verifier import build_verifier_prompt
+    from challenge_plans.deliberation import build_voter_prompt
+    c = Concern(artifact_span="L1-2", failure_type="x", severity=Severity.HIGH,
+                title="t", evidence="e", concrete_failure_step="s")
+    prompts = (build_challenger_prompt("L1: x", "plan", "lens.", ("x",), 3),
+               build_verifier_prompt("L1: x", c, "plan"),
+               build_voter_prompt("q?", [{"id": "A", "text": "a"}, {"id": "B", "text": "b"}], "l"))
+    for p in prompts:
+        assert UNTRUSTED_GUARD in p          # every reviewer is told the content is untrusted
+        assert p.rstrip().endswith(M)        # the guard didn't displace the end marker

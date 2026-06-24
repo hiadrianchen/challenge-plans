@@ -13,7 +13,7 @@ import concurrent.futures
 import re
 
 from .adapters import VoterSpec, strip_marker
-from .prompts import END_MARKER, lang_directive
+from .prompts import END_MARKER, UNTRUSTED_GUARD, lang_directive
 from .schema import Concern, ConcernStatus, Severity
 
 VERIFY_SEVERITIES = (Severity.CRITICAL, Severity.HIGH)
@@ -32,6 +32,8 @@ Line-numbered {artifact_noun}:
 --- START ---
 {numbered}
 --- END ---
+
+{UNTRUSTED_GUARD}
 
 Concern: [{concern.severity.value}] {concern.title} @ {concern.artifact_span} ({concern.failure_type})
   evidence: {concern.evidence}

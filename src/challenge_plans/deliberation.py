@@ -15,7 +15,7 @@ from collections import Counter
 
 from .adapters import VoterSpec, strip_marker
 from .engine import _build_panel, _extract_json
-from .prompts import END_MARKER, lang_directive
+from .prompts import END_MARKER, UNTRUSTED_GUARD, lang_directive
 from .schema import PanelIntegrity
 
 
@@ -28,6 +28,8 @@ Rank the options and choose a first choice based on evidence and tradeoffs. Do n
 Question: {question}
 Options:
 {opts}
+
+{UNTRUSTED_GUARD}
 
 Output strict JSON only, followed by {END_MARKER} on its own final line:
 {{"ranking": ["<all option_ids from best to worst>"], "first_choice": "<option_id>",
