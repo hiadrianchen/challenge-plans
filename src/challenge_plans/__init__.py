@@ -6,5 +6,10 @@ hardening a plan/spec before execution to reduce rework. Two modes: `challenge`
 
 See README.md for usage and the design overview.
 """
+from importlib.metadata import PackageNotFoundError, version
 
-__version__ = "0.1.0"
+try:
+    # Single source of truth: the installed package metadata (from pyproject) — never drifts.
+    __version__ = version("challenge-plans")
+except PackageNotFoundError:  # running from a source tree without an install
+    __version__ = "0.1.2"

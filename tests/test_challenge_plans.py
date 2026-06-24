@@ -459,3 +459,30 @@ def test_doctor_remediation_hints_are_actionable():
     assert "install" in _remediation(CodexAdapter(), ProbeState.NOT_INSTALLED).lower()
     # ready needs no remediation.
     assert _remediation(ClaudeAdapter(), ProbeState.READY) == ""
+
+
+# ── --deep multi-round convergence (the design goal — really iterate, don't just claim it) ──
+def test_deep_runs_multiple_rounds_and_converges(tmp_path):
+    # --deep iterates; with a static artifact, round 2 surfaces nothing new -> converges at round 2.
+    sc = {"mock:execution-failure": cbody([concern(ft="hidden_dependency")]),
+          "mock:correctness": cbody([]), "mock:scope-boundary": cbody([])}
+    m = run_challenge(mk(tmp_path), "spec", "deep", [MockAdapter(sc, "mock")])
+    assert m["rounds"] == 2
+    assert m["convergence"]["converged"] is True
+    assert m["convergence"]["reason"] == "no_new_objections"
+
+
+def test_standard_is_single_round(tmp_path):
+    m = run_challenge(mk(tmp_path), "spec", "standard",
+                      [MockAdapter({"mock:execution-failure": cbody([])}, "mock")])
+    assert m["rounds"] == 1 and m["convergence"]["reason"] == "single_round"
+
+
+def test_version_matches_pyproject():
+    # The bug an external review caught: __version__ drifting from pyproject. Pin them together.
+    import pathlib
+    import re
+    import challenge_plans
+    pp = pathlib.Path(challenge_plans.__file__).resolve().parents[2] / "pyproject.toml"
+    declared = re.search(r'(?m)^version = "([^"]+)"', pp.read_text(encoding="utf-8")).group(1)
+    assert challenge_plans.__version__ == declared

@@ -23,10 +23,10 @@ drafted artifact (plan / spec / diff / any plan) + bounded context
   → Verifier (cross-family) produces a minimal reproduction / contradicting source line
   → dedup by canonical key + evidence-survival
   → single verdict pipeline → 6-state verdict + panel-integrity check
-  → (--deep: multi-round to two-condition convergence)
+  → (--deep: loop the panel — each round is shown prior findings and hunts new ones — until a round adds nothing new, or the round cap)
 ```
 
-**Cross-family verification** is the core guarantee: a high/critical objection only earns hard-gate authority (`✓`) when an *independent model family* reproduces it with concrete, line-anchored evidence. A single model's claim stays advisory (`?`). That's why bringing two different vendors (e.g. Claude Code + Codex) matters — they check each other.
+**Cross-family verification** is the core guarantee: a high/critical objection only earns hard-gate authority (`✓`) when an *independent model family* reproduces it with concrete, line-anchored evidence. This is **cross-model confirmation, not a mechanically-run test** — another family says "yes, here's the line"; nothing runs your code. (For `--type diff`, wiring in real test/typecheck/lint verification is on the Roadmap.) A single model's claim stays advisory (`?`). That's why bringing two different vendors (e.g. Claude Code + Codex) matters — they check each other.
 
 ## Deliberation (a strict three-phase flow)
 
@@ -41,15 +41,15 @@ The `weigh` CLI implements phase ③; phases ①② are the calling agent's job 
 
 ## The 7 multi-agent failure modes it guards against
 
-Traps a naive multi-agent setup almost always falls into — and ones **we hit ourselves while building this tool with its own adversarial process**. Each guard is built into the design.
+Traps a naive multi-agent setup almost always falls into — and ones **we hit ourselves while building this tool with its own adversarial process**. Each guard is enforced in code.
 
-1. **Vote/finding loss** — a challenger is truncated/timed-out/unparseable and the system silently aggregates a partial panel. **Guard:** machine-readable capture + per-voter integrity self-check; missing votes never approve or declare a majority.
-2. **Option anchoring** — the orchestrator only offers its own pre-picked options. **Guard:** deliberation always diverges (generate first, vote second); voters aren't fed the orchestrator's preferences.
-3. **Premature hand-off** — the orchestrator bounces the decision back to the human mid-way. **Guard:** close the loop and return a result; hand back only on a tie / missing votes.
-4. **Majority over minority** — out-voting a minority that has a reproducible blocker. **Guard:** two modes with split aggregation + the escape gate; adversarial mode bans voting and lets evidence beat headcount.
-5. **Single-round complacency** — one pass declared sufficient. **Guard:** `--deep` multi-round to convergence + adversarial review of the code itself before shipping.
-6. **False consensus** — same-model personas counted as independent votes. **Guard:** per-`model_family` weight cap, raw/weighted both shown, single-family warning.
-7. **False convergence** — declaring "done" when no *new* objection appeared but an old blocker is still open. **Guard:** two-condition convergence (new_surviving == 0 **and** unresolved_required == 0).
+1. **Vote/finding loss** — a challenger is truncated/timed-out/unparseable and the system silently aggregates a partial panel. **Guard (in code):** machine-readable capture + per-voter integrity self-check; missing votes never approve or declare a majority.
+2. **Option anchoring** — the orchestrator only offers its own pre-picked options. **Guard (in code):** deliberation always diverges (generate first, vote second); voters aren't fed the orchestrator's preferences.
+3. **Premature hand-off** — the orchestrator bounces the decision back to the human mid-way. **Guard (in code):** close the loop and return a result; hand back only on a tie / missing votes.
+4. **Majority over minority** — out-voting a minority that has a reproducible blocker. **Guard (in code):** two modes with split aggregation + the escape gate; adversarial mode bans voting and lets evidence beat headcount.
+5. **Single-round complacency** — one pass declared sufficient. **Guard (in code):** `--deep` loops the panel, each round hunting what the last missed, until a round finds nothing new.
+6. **False consensus** — same-model personas counted as independent votes. **Guard (in code):** per-`model_family` weight cap, raw/weighted both shown, single-family warning.
+7. **False convergence** — declaring "done" when a round found nothing new. **Guard (in code):** `--deep` stops only when a round surfaces zero new concerns (`convergence.reason = no_new_objections`); otherwise it reports `round_cap_reached`, never a false "done".
 
 ## Fits into your planning workflow
 
@@ -72,3 +72,16 @@ This slots exactly where superpowers' own pre-execution review sits — but upgr
 ## Known boundaries
 
 Concern dedup is exact-anchor only; no idle-timeout (wall-clock only); deliberation blockers are flagged, not yet auto-verified by the Verifier; the open-decision divergence phase is the calling agent's job; `manual_paste` / additional adapters are follow-ups.
+
+## Roadmap
+
+Honest about what isn't built yet. challenge-plans is **advisory-grade** today — great for a human/agent review pass, not yet a hard CI quality gate. Planned, roughly in order:
+
+- **`--strict` gate mode** — let `discuss` (and optionally `approve_with_unverified_timeouts`) exit non-zero, so a single-family run can't look gated while passing. Today `--enforce` exits non-zero only on `request_changes` / `inconclusive` / `schema_invalid`.
+- **Mechanical verification for `--type diff`** — run tests / typecheck / lint / static analysis (not just a second LLM) before a code finding can hard-gate. Today the `✓` is cross-model confirmation, not a test run.
+- **Persistent run provenance** — write raw outputs, model + version, artifact hash, and verdict to a store for audit and replay.
+- **Robust source anchors** — block id / content hash / git hunk range instead of bare line numbers, so findings survive edits to long-lived artifacts.
+- **Untrusted-artifact isolation** — prompt-injection hardening (the artifact is untrusted input) + schema-repair retries on malformed output.
+- **Backend provider abstraction** — CLI transport today; SDK / API / `manual_paste` planned, each declaring data-egress, quota, and timeout policy.
+
+These came out of adversarial review of challenge-plans itself — fittingly.

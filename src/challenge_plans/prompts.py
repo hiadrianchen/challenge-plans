@@ -41,8 +41,16 @@ def lang_directive() -> str:
 
 
 def build_challenger_prompt(artifact_text: str, artifact_noun: str, lens: str,
-                            failure_types: tuple[str, ...], max_findings: int) -> str:
+                            failure_types: tuple[str, ...], max_findings: int,
+                            prior: list[str] | None = None) -> str:
     types = ", ".join(failure_types)
+    # --deep multi-round: later rounds get the already-found concerns and must surface only NEW ones.
+    # A round that adds nothing new is what makes the loop converge instead of repeat.
+    prior_block = ""
+    if prior:
+        listed = "\n".join(f"- {p}" for p in prior)
+        prior_block = ("\n\nThese concerns were ALREADY raised in an earlier round — do NOT repeat them. "
+                       f"Raise only NEW issues not already covered (raise 0 if there are none):\n{listed}")
     return f"""You are an adversarial {artifact_noun} review challenger. {lens}
 
 Below is the {artifact_noun} with line numbers. Line numbers are anchors, not content:
@@ -55,7 +63,7 @@ Rules you must follow:
 2. Raise at most {max_findings} concerns; raise 0 if there are none. **Do not invent issues.**
 3. Every concern must bind to a specific line anchor such as "L12-15"; choose failure_type from this enum: [{types}];
    state the most likely step where execution would fail; evidence must quote specific text from the artifact.
-4. No hedging.{lang_directive()}
+4. No hedging.{prior_block}{lang_directive()}
 
 Output the following **strict JSON** only, with no extra explanation, followed by {END_MARKER} on its own final line:
 {{

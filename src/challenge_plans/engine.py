@@ -1,10 +1,11 @@
 """Adversarial-mode loop: read artifact → parallel challengers → integrity capture →
 parse into Concerns → dedup by canonical key (keep strictest) → single verdict pipeline → run manifest.
 
-Single-round, multi-persona across the available subscription CLIs, run in parallel. A
-cross-family Verifier and a minimal frontmatter/field preflight are implemented; current
-limitations: no idle-timeout (wall-clock only) and no parse retry. See the CLI `--enforce`
-flag and the manifest fields for details.
+Multi-persona across the available subscription CLIs, run in parallel. `--deep` runs multiple
+rounds: each later round sees the concerns already found and is asked for NEW ones only, and the
+loop stops when a round surfaces nothing new (convergence) or hits the round cap. A cross-family
+Verifier and a minimal frontmatter/field preflight are implemented; current limitations: no
+idle-timeout (wall-clock only) and no parse retry. See the CLI `--enforce` flag and the manifest.
 """
 from __future__ import annotations
 
@@ -23,6 +24,13 @@ from .schema import (
 # Default panel lenses for deliberation mode: type-agnostic voting perspectives reused from the spec rubric.
 _PROFILE_PERSONAS = SPEC_RUBRIC.profile_personas
 _PROFILE_MAX_FINDINGS = {"fast": 1, "standard": 3, "deep": 3}
+# --deep iterates until a round finds nothing new (convergence) or hits this cap; fast/standard = 1 round.
+_PROFILE_MAX_ROUNDS = {"fast": 1, "standard": 1, "deep": 3}
+
+
+def _prior_summaries(concerns_by_key: dict) -> list[str]:
+    """Compact list of already-found concerns to hand the next --deep round (so it finds NEW ones)."""
+    return [f"{c.artifact_span} {c.failure_type}: {c.title}" for c in concerns_by_key.values()]
 _SPAN_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
 _DECODER = json.JSONDecoder()
 
@@ -113,7 +121,7 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
     artifact_hash = hashlib.sha256(artifact_text.encode()).hexdigest()[:16]
 
     base = {"mode": "challenge", "artifact_type": artifact_type,
-            "artifact_hash": artifact_hash, "rounds": 1, "profile": profile,
+            "artifact_hash": artifact_hash, "rounds": 0, "profile": profile,
             "verifier": "present (cross-family, v0)"}
 
     def _schema_invalid(reason):
@@ -140,54 +148,72 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
 
     numbered = _number_lines(body)
     max_findings = _PROFILE_MAX_FINDINGS[profile]
-    voters = _build_panel(profile, adapters, rubric.profile_personas[profile])
+    max_rounds = _PROFILE_MAX_ROUNDS[profile]
     valid_failure_types = set(rubric.failure_types)
-    panel = PanelIntegrity(expected_voters=len(voters))
-
-    # Parallel challengers across adapters/families.
-    def _run(adapter, persona, voter_id):
-        spec = VoterSpec(voter_id=voter_id, backend=adapter.backend,
-                         model_family=adapter.model_family, persona=persona)
-        prompt = build_challenger_prompt(numbered, rubric.artifact_noun,
-                                         rubric.personas[persona], rubric.failure_types, max_findings)
-        return voter_id, spec, adapter.invoke(prompt, spec)
-
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(voters)) as ex:
-        for fut in [ex.submit(_run, a, p, v) for a, p, v in voters]:
-            results.append(fut.result())
+    panel = PanelIntegrity(expected_voters=0)  # accumulated across rounds
 
     concerns_by_key: dict[str, Concern] = {}
     raised_by: dict[str, list[str]] = {}
     voters_meta: list[dict] = []
     dropped: list[dict] = []
     families: set[str] = set()
+    rounds_run, converged = 0, False
 
-    for voter_id, spec, cap in results:
-        meta = {"voter_id": voter_id, "backend": spec.backend,
-                "model_family": spec.model_family, "transport": spec.transport}
-        if not cap.ok:
-            panel.missing.append({"voter": voter_id,
-                                  "reason": cap.reason.value if cap.reason else "unknown"})
-            meta["status"] = "capture_failed"
+    for rnd in range(1, max_rounds + 1):
+        rounds_run = rnd
+        voters = _build_panel(profile, adapters, rubric.profile_personas[profile])
+        panel.expected_voters += len(voters)
+        # Round 2+ is handed what's already been found and asked for NEW concerns only — a round
+        # that adds nothing new is what makes --deep converge instead of just repeating round 1.
+        prior = _prior_summaries(concerns_by_key) if rnd > 1 else None
+
+        def _run(adapter, persona, voter_id, _prior=None):
+            spec = VoterSpec(voter_id=voter_id, backend=adapter.backend,
+                             model_family=adapter.model_family, persona=persona)
+            prompt = build_challenger_prompt(numbered, rubric.artifact_noun, rubric.personas[persona],
+                                             rubric.failure_types, max_findings, prior=_prior)
+            return voter_id, spec, adapter.invoke(prompt, spec)
+
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(voters)) as ex:
+            futs = [ex.submit(_run, a, p, v, prior) for a, p, v in voters]
+            for fut in futs:
+                results.append(fut.result())
+
+        new_keys = 0
+        for voter_id, spec, cap in results:
+            meta = {"voter_id": voter_id, "backend": spec.backend, "round": rnd,
+                    "model_family": spec.model_family, "transport": spec.transport}
+            if not cap.ok:
+                panel.missing.append({"voter": voter_id,
+                                      "reason": cap.reason.value if cap.reason else "unknown"})
+                meta["status"] = "capture_failed"
+                voters_meta.append(meta)
+                continue
+            raw = _extract_json(strip_marker(cap.text))
+            if raw is None:
+                panel.missing.append({"voter": voter_id, "reason": "parse_error"})
+                meta["status"] = "parse_error"
+                voters_meta.append(meta)
+                continue
+            panel.collected_voters += 1
+            families.add(spec.model_family)
+            meta["status"] = "ok"
             voters_meta.append(meta)
-            continue
-        raw = _extract_json(strip_marker(cap.text))
-        if raw is None:
-            panel.missing.append({"voter": voter_id, "reason": "parse_error"})
-            meta["status"] = "parse_error"
-            voters_meta.append(meta)
-            continue
-        panel.collected_voters += 1
-        families.add(spec.model_family)
-        meta["status"] = "ok"
-        voters_meta.append(meta)
-        for c in _parse_concerns(raw, voter_id, nlines, dropped, valid_failure_types):
-            existing = concerns_by_key.get(c.key)
-            # Dedup + strictest-wins: keep the highest severity per key and merge raised_by.
-            if existing is None or severity_rank(c.severity) > severity_rank(existing.severity):
-                concerns_by_key[c.key] = c
-            raised_by.setdefault(c.key, []).append(voter_id)
+            for c in _parse_concerns(raw, voter_id, nlines, dropped, valid_failure_types):
+                existing = concerns_by_key.get(c.key)
+                if existing is None:
+                    new_keys += 1
+                    concerns_by_key[c.key] = c
+                elif severity_rank(c.severity) > severity_rank(existing.severity):
+                    # Dedup + strictest-wins: keep the highest severity per key.
+                    concerns_by_key[c.key] = c
+                raised_by.setdefault(c.key, []).append(voter_id)
+
+        # Convergence: a later round that surfaces no NEW concern means there's nothing left to find.
+        if rnd > 1 and new_keys == 0:
+            converged = True
+            break
 
     # Missing required_to_approve fields inject synthetic contract concerns.
     # Only frontmatter-contract artifacts such as specs get this; diff has no such contract.
@@ -214,6 +240,12 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
     return {
         **base,
         "verdict": verdict.value,
+        "rounds": rounds_run,
+        "convergence": {
+            "converged": converged,
+            "reason": ("single_round" if max_rounds == 1
+                       else "no_new_objections" if converged else "round_cap_reached"),
+        },
         "source_diversity": {"families": len(families), "voters": panel.collected_voters,
                              "warning": "low_diversity_single_family" if low_diversity else None},
         "panel_integrity": {"expected_voters": panel.expected_voters,

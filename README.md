@@ -73,7 +73,7 @@ Every objection is tagged from a fixed menu of *ways a plan breaks* — which ke
 - `no_fallback` — no plan B if that restaurant is booked out
 - `goal_misalignment` — a "relaxing" trip scheduled dawn to midnight
 
-`--profile fast` runs one reviewer, `standard` all three, `deep` several rounds until no *new* objection survives.
+`--profile fast` runs one reviewer, `standard` all three (one round); `deep` runs the panel for multiple rounds — each round is shown what's already been found and hunts for what the last one missed — and stops when a round surfaces nothing new (convergence).
 
 ## Usage
 
@@ -89,9 +89,9 @@ Every objection is tagged from a fixed menu of *ways a plan breaks* — which ke
 | Review a **code change** | `git diff > c.diff && challenge-plans run c.diff --type diff` |
 | **Choose** among options | `challenge-plans weigh options.yaml --sink markdown` |
 | Get findings in **Chinese** | add `--lang zh` |
-| Use it as a **CI gate** | add `--enforce` (non-approve exits non-zero) |
+| Use it as a **CI gate** | add `--enforce` (`request_changes` / `inconclusive` / `schema_invalid` exit non-zero; `discuss`/`approve` exit 0) |
 
-`--profile fast|standard|deep` trades speed for depth. `[sev✓]` = cross-family verified (may hard-gate); `[sev?]` = unverified, advisory. Ready-to-run samples live in [`examples/`](examples/). Not pip-installed? Prefix with `PYTHONPATH=src python3 -m challenge_plans.cli …`.
+`--profile fast|standard|deep` trades speed for depth. `[sev✓]` = an independent model family reproduced it with line-anchored evidence (cross-model *confirmation* — not a mechanically-run test), so it may hard-gate; `[sev?]` = unconfirmed, advisory. Ready-to-run samples live in [`examples/`](examples/). Not pip-installed? Prefix with `PYTHONPATH=src python3 -m challenge_plans.cli …`.
 
 ## Output in your language
 
