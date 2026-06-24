@@ -100,11 +100,7 @@ Two ideas do the work:
 - **Failure types** — every objection must be tagged with one of a fixed menu of *ways a plan can break* (`missing_success_criteria`, `ignored_constraint`, `unaddressed_risk`, `dependency_or_sequencing_gap`, `unstated_assumption`, `goal_misalignment`, `irreversibility_or_high_cost`, `no_fallback`). No vague "this feels off" — each finding is concrete, anchored to a line, and dedup-able.
 - **Lenses** — each reviewer wears a different hat so they don't all stare at the same spot: **feasibility** (can it actually be done under real constraints), **risk** (what's most likely to go wrong / is irreversible), **goal-alignment** (do the steps serve the stated goal; what assumptions must hold). `--profile fast` uses one lens, `standard` all three, `deep` runs multiple rounds until no *new* objection survives.
 
-## Why a tool, and not just a prompt?
-
-You could paste "review my plan adversarially" into any chat. The reason this is a CLI is **consistency**: a plain-prompt skill drifts between agents and runs — one does three rounds, another does one; one treats a timed-out reviewer as "no objection", another as "inconclusive"; one keeps a minority blocker, another lets the majority bury it. challenge-plans turns the review into a **repeatable protocol**: spawn the reviewers, enforce the failure-type schema, detect timeouts/missing votes, dedup by anchor, require *cross-family* reproduction before a finding can hard-gate, and resolve one 6-state verdict. Same plan in, same shape of answer out — testable and pinned by a test suite, not left to each agent's mood.
-
-### Output in your language
+## Output in your language
 
 challenge-plans ships an English codebase, but the reviewers can answer in **any** language — just add `--lang`:
 

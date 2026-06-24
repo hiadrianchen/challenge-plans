@@ -100,11 +100,7 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 - **失败类型** —— 每条异议都必须贴一个标签，选自一份固定的「**计划可能错在哪**」清单（`missing_success_criteria` 没有成功标准、`ignored_constraint` 忽略现实约束、`unaddressed_risk` 没应对风险、`dependency_or_sequencing_gap` 依赖/顺序漏洞、`unstated_assumption` 没说明的假设、`goal_misalignment` 目标跑偏、`irreversibility_or_high_cost` 不可逆/高代价、`no_fallback` 没有 plan B）。不许「感觉不太行」——每条都具体、绑到行、可去重。
 - **镜头** —— 每个评审戴不同的帽子，免得都盯同一处：**feasibility**（现实约束下能不能落地）、**risk**（哪最可能出错/不可逆）、**goal-alignment**（步骤是否服务于声称的目标、哪些假设必须成立）。`--profile fast` 用一个镜头，`standard` 用全 3 个，`deep` 多轮直到没有**新**异议存活。
 
-## 为什么是工具，而不只是一段提示词？
-
-你完全可以往任何对话里粘「对抗式审一下我的计划」。它做成 CLI 的理由是**一致性**：纯提示词的 skill 会在不同 agent、不同次运行间漂——有的跑三轮、有的跑一轮；有的把超时的评审当「无异议」、有的当「inconclusive」；有的保留少数派 blocker、有的被多数压掉。challenge-plans 把评审变成**可重复的协议**：拉起评审、强制失败类型 schema、检出超时/缺票、按锚点去重、要求**跨家族**复现才能硬 gate、最后收敛成一个六态 verdict。同样的计划进去，同样形状的答案出来——可测试、由测试套件钉死，而不是看每个 agent 的心情。
-
-### 按你的语言输出
+## 按你的语言输出
 
 challenge-plans 源码是英文的，但评审可以用**任意**语言作答 —— 加上 `--lang` 即可：
 
