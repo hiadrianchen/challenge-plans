@@ -78,7 +78,6 @@ Concern dedup is exact-anchor only; no idle-timeout (wall-clock only); deliberat
 Honest about what isn't built yet. By default challenge-plans is **advisory** (a human/agent review pass); `--strict` turns it into a hard gate, but the gate's strength is still LLM cross-model confirmation, not mechanical proof. Planned, roughly in order:
 
 - **Mechanical verification for `--type diff`** — run tests / typecheck / lint / static analysis (not just a second LLM) before a code finding can hard-gate. Today the `✓` is cross-model confirmation, not a test run.
-- **Persistent run provenance** — write raw outputs, model + version, artifact hash, and verdict to a store for audit and replay.
 - **Robust source anchors** — block id / content hash / git hunk range instead of bare line numbers, so findings survive edits to long-lived artifacts.
 - **Schema-repair retries + injection detection** — the artifact is already framed as untrusted input (every reviewer is told to treat the delimited content as data, ignore instructions embedded in it, and flag any as a finding). Still planned: retry/repair on malformed JSON output, and a dedicated injection detector.
 - **Backend provider abstraction** — CLI transport today; SDK / API / `manual_paste` planned, each declaring data-egress, quota, and timeout policy.

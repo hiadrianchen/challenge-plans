@@ -525,3 +525,35 @@ def test_untrusted_guard_in_every_prompt():
     for p in prompts:
         assert UNTRUSTED_GUARD in p          # every reviewer is told the content is untrusted
         assert p.rstrip().endswith(M)        # the guard didn't displace the end marker
+
+
+# ── provenance persistence (audit / replay) ──
+def test_save_provenance_writes_full_record(tmp_path):
+    import json
+    import pathlib
+    import challenge_plans
+    from challenge_plans.cli import _save_provenance, build_parser
+    m = {"artifact_hash": "abc123", "verdict": "approve", "concerns": [], "profile": "fast"}
+    path = _save_provenance(m, str(tmp_path / "runs"))
+    rec = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    assert rec["tool"] == "challenge-plans"
+    assert rec["tool_version"] == challenge_plans.__version__
+    assert rec["manifest"] == m              # full manifest persisted verbatim
+    assert "created_at" in rec and "abc123" in path
+    # the flag wires through the parser and defaults off.
+    assert build_parser().parse_args(["run", "x.md", "--save", "/tmp/r"]).save == "/tmp/r"
+    assert build_parser().parse_args(["run", "x.md"]).save is None
+
+
+def test_save_provenance_never_overwrites(tmp_path, monkeypatch):
+    # Audit records must not silently overwrite (gate caught same-instant collision). Freeze the
+    # clock so all three runs collide on the timestamp and actually exercise the dedup loop.
+    import datetime
+    import pathlib
+    from challenge_plans import cli
+    monkeypatch.setattr(cli, "_utcnow",
+                        lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc))
+    m = {"artifact_hash": "same", "verdict": "approve"}
+    paths = [cli._save_provenance(m, str(tmp_path)) for _ in range(3)]
+    assert len(set(paths)) == 3                      # collision loop -> distinct -1/-2 suffixes
+    assert all(pathlib.Path(p).exists() for p in paths)

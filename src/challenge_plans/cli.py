@@ -48,6 +48,31 @@ def _exit_code(verdict: str, enforce: bool, strict: bool = False) -> int:
     return _ENFORCE_EXIT.get(verdict, 1)
 
 
+def _utcnow():
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def _save_provenance(manifest: dict, save_dir: str) -> str:
+    """Persist a run record (tool version + UTC timestamp + full manifest) for audit/replay."""
+    import os
+    import pathlib
+    d = pathlib.Path(save_dir).expanduser()
+    d.mkdir(parents=True, exist_ok=True)
+    ts = _utcnow()
+    record = {"tool": "challenge-plans", "tool_version": __version__,
+              "created_at": ts.isoformat(), "manifest": manifest}
+    stem = f"run-{ts:%Y%m%dT%H%M%S_%fZ}-{manifest.get('artifact_hash', 'na')}"
+    path, n = d / f"{stem}.json", 1
+    while path.exists():  # an audit record must never silently overwrite an earlier one
+        path, n = d / f"{stem}-{n}.json", n + 1
+    # Atomic: write to a temp file then rename, so a crash mid-write can't leave a partial record.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return str(path)
+
+
 def _render_markdown(m: dict) -> str:
     pi = m["panel_integrity"]
     div = m["source_diversity"]
@@ -105,6 +130,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(_render_markdown(manifest))
     else:
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    if getattr(args, "save", None):
+        # stderr so it never pollutes a piped --sink stdout JSON. A save I/O error must not crash
+        # the run or discard the gate exit code — provenance is a side effect, not the verdict.
+        try:
+            print(f"saved provenance: {_save_provenance(manifest, args.save)}", file=sys.stderr)
+        except OSError as e:
+            print(f"warning: could not save provenance to {args.save}: {e}", file=sys.stderr)
     return _exit_code(manifest["verdict"], args.enforce, getattr(args, "strict", False))
 
 
@@ -224,6 +256,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--strict", action="store_true",
                      help="hard gate: only a clean `approve` passes; discuss / "
                           "approve_with_unverified_timeouts also exit non-zero")
+    run.add_argument("--save", metavar="DIR",
+                     help="persist a run record (tool version + timestamp + full manifest) to DIR "
+                          "for audit / replay")
     run.add_argument("--lang", default="en", metavar="LANG",
                      help="language for human-readable output (e.g. en, zh, ja); "
                           "JSON keys / enums / line anchors stay stable. Default en")

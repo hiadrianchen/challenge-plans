@@ -91,6 +91,7 @@ Every objection is tagged from a fixed menu of *ways a plan breaks* — which ke
 | Get findings in **Chinese** | add `--lang zh` |
 | Use it as a **CI gate** | add `--enforce` (`request_changes` / `inconclusive` / `schema_invalid` exit non-zero; `discuss`/`approve` exit 0) |
 | Use it as a **hard gate** | add `--strict` (only a clean `approve` passes; `discuss` and `approve_with_unverified_timeouts` also fail) |
+| Keep an **audit trail** | add `--save runs/` (writes a timestamped JSON record — tool version + full manifest — per run) |
 
 `--profile fast|standard|deep` trades speed for depth. `[sev✓]` = an independent model family reproduced it with line-anchored evidence (cross-model *confirmation* — not a mechanically-run test), so it may hard-gate; `[sev?]` = unconfirmed, advisory. Ready-to-run samples live in [`examples/`](examples/). Not pip-installed? Prefix with `PYTHONPATH=src python3 -m challenge_plans.cli …`.
 
