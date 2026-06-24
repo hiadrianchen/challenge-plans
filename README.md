@@ -56,24 +56,22 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 - [med ] "A good trip" is never defined, so nothing can be judged   @L1   (missing_success_criteria, by claude:goal-alignment)
 ```
 
-Each line is one **tagged objection** — anchored to a line, raised by one reviewer with a single job.
+Each line is a **tagged objection** — anchored to a line, raised by one reviewer with a single job. The three findings above came from three reviewers:
 
-**The reviewers** (each takes one perspective):
+- **Feasibility** *(can it actually be done?)* → caught the **non-refundable flight** locked in before the plan is even validated.
+- **Risk** *(what's most likely to go wrong / is irreversible?)* → caught **Day 2 cramming six sights** across the city with no time budget.
+- **Goal-alignment** *(do the steps serve the goal?)* → caught that **"a good trip" is never defined**, so nothing can be judged.
 
-- **Feasibility** — can it actually be done under real constraints?
-- **Risk** — what's most likely to go wrong, costly, or irreversible?
-- **Goal-alignment** — do the steps serve the stated goal? which assumptions must hold?
+Every objection is tagged from a fixed menu of *ways a plan breaks* — which keeps findings concrete and de-duplicable. Here's what each one catches, in this trip:
 
-**The failure types** (every objection must pick one, so findings stay concrete and de-duplicable):
-
-- `missing_success_criteria` — no measurable "done"
-- `ignored_constraint` — time / budget / people not accounted for
-- `unaddressed_risk` — a known failure mode with no mitigation
-- `dependency_or_sequencing_gap` — steps that don't line up
-- `unstated_assumption` — relies on something unproven
-- `goal_misalignment` — the steps don't serve the goal
-- `irreversibility_or_high_cost` — a costly step with no checkpoint
-- `no_fallback` — no plan B if a step fails
+- `irreversibility_or_high_cost` — booking a non-refundable flight before validating the plan
+- `ignored_constraint` — six sights in one day, no time or energy budget
+- `missing_success_criteria` — never saying what "a good trip" means
+- `dependency_or_sequencing_gap` — a 10:00 train right after "last-minute shopping"
+- `unaddressed_risk` — going in mid-July with no rain/heat backup
+- `unstated_assumption` — assuming the famous kaiseki place has a table
+- `no_fallback` — no plan B if that restaurant is booked out
+- `goal_misalignment` — a "relaxing" trip scheduled dawn to midnight
 
 `--profile fast` runs one reviewer, `standard` all three, `deep` several rounds until no *new* objection survives.
 

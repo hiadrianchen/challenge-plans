@@ -56,24 +56,22 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 - [med ] 从没定义「什么算一趟好旅行」，无从判断行程好坏  @L1   (missing_success_criteria, by claude:goal-alignment)
 ```
 
-每一行是一条**贴了标签的异议**——绑到具体行、由某个只管一件事的评审提出。
+每一行是一条**贴了标签的异议**——绑到具体行、由某个只管一件事的评审提出。上面三条就来自三个评审：
 
-**评审**（每个只盯一个视角）：
+- **可行性** *（现实里能不能落地？）* → 抓到**机票不可退**却在行程还没验证前就锁死。
+- **风险** *（哪最可能出错 / 不可逆？）* → 抓到 **Day2 横跨全城塞了 6 个景点**、没有时间预算。
+- **目标对齐** *（步骤能达成目标吗？）* → 抓到**从没定义「什么算一趟好旅行」**，于是无从判断。
 
-- **可行性** —— 现实约束下到底能不能落地？
-- **风险** —— 哪里最可能出错、代价最大、不可逆？
-- **目标对齐** —— 步骤真能达成声称的目标吗？哪些假设必须成立？
+每条异议都从一份固定的「**计划可能错在哪**」清单里选标签——这让每条都具体、可去重。每个标签放到这趟旅行上会抓到什么：
 
-**失败类型**（每条异议必须选一个，所以每条都具体、可去重）：
-
-- `missing_success_criteria` —— 没有可度量的「完成」标准
-- `ignored_constraint` —— 时间 / 预算 / 人力没算进去
-- `unaddressed_risk` —— 已知风险没有应对
-- `dependency_or_sequencing_gap` —— 步骤依赖 / 顺序对不上
-- `unstated_assumption` —— 依赖一个没说明、未必成立的假设
-- `goal_misalignment` —— 手段不服务于目标
-- `irreversibility_or_high_cost` —— 不可逆 / 高代价、没设检查点
-- `no_fallback` —— 没有 plan B
+- `irreversibility_or_high_cost` —— 行程没验证就先订了不可退的机票
+- `ignored_constraint` —— 一天 6 个景点，没算时间和体力
+- `missing_success_criteria` —— 从没说清「什么算一趟好旅行」
+- `dependency_or_sequencing_gap` —— 「临时购物」之后紧接着赶 10:00 的车
+- `unaddressed_risk` —— 7 月去却没有雨天 / 高温的备选
+- `unstated_assumption` —— 默认那家名怀石料理一定有位
+- `no_fallback` —— 那家订不到就没有 plan B
+- `goal_misalignment` —— 说是「放松」的旅行却从早排到半夜
 
 `--profile fast` 跑一个评审，`standard` 跑全 3 个，`deep` 多轮直到没有**新**异议存活。
 
