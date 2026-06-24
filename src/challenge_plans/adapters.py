@@ -45,6 +45,11 @@ class VoterSpec:
     effort: str | None = None
 
 
+def claude_cli_env() -> dict[str, str]:
+    """Use Claude Code's logged-in CLI auth, not inherited Anthropic API env."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_")}
+
+
 def strip_marker(text: str) -> str:
     """Strip the trailing END_MARKER line after check_capture has confirmed it is line-exclusive."""
     lines = text.rstrip().splitlines()
@@ -89,7 +94,8 @@ class ClaudeAdapter:
         # Real auth probe: --version also returns 0 when logged out, so run one minimal `claude -p`.
         try:
             r = subprocess.run(["claude", "-p", "--output-format", "text", "ok"],
-                               capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, timeout=60,
+                               env=claude_cli_env())
         except subprocess.TimeoutExpired:
             return ProbeState.BILLING_UNKNOWN
         except OSError:
@@ -107,7 +113,8 @@ class ClaudeAdapter:
         """
         cmd = ["claude", "-p", "--output-format", "text", prompt]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=wall_timeout)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=wall_timeout,
+                               env=claude_cli_env())
         except subprocess.TimeoutExpired:
             return CaptureResult(False, "", CaptureFailureReason.TIMEOUT)
         except OSError:

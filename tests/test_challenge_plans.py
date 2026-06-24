@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from challenge_plans.adapters import MockAdapter
+from challenge_plans.adapters import MockAdapter, claude_cli_env
 from challenge_plans.engine import _extract_json, run_challenge
 from challenge_plans.prompts import END_MARKER
 from challenge_plans.schema import (
@@ -18,6 +18,16 @@ from challenge_plans.schema import (
 )
 
 M = END_MARKER
+
+
+def test_claude_cli_env_strips_anthropic_vars(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "secret")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://example.invalid")
+    monkeypatch.setenv("CHALLENGE_PLANS_LANG", "zh")
+    env = claude_cli_env()
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+    assert "ANTHROPIC_BASE_URL" not in env
+    assert env["CHALLENGE_PLANS_LANG"] == "zh"
 
 
 def cbody(concerns):
