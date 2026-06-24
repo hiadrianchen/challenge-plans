@@ -8,7 +8,7 @@
 
 **Adversarially review your plan or spec before you execute it — across the coding CLIs you already have logged in. No API keys.**
 
-`challenge-plans` orchestrates the subscription AI coding CLIs already on your machine (Claude Code, Codex, …) to cross-examine a plan/spec and surface the flaws that cause rework downstream — and to vote across options when you're unsure. It runs on your existing subscriptions, so there are no per-token API charges. It slots into the superpowers plan lifecycle: `writing-plans → challenge-plans → executing-plans`.
+`challenge-plans` orchestrates the subscription AI coding CLIs already on your machine (Claude Code, Codex, …) to cross-examine a plan/spec and surface the flaws that cause rework downstream — and to vote across options when you're unsure. It also reviews a raw `git diff` as a lightweight **code review** pass, and drops in as an **agent skill**. It runs on your existing subscriptions, so there are no per-token API charges. It slots into the superpowers plan lifecycle: `writing-plans → challenge-plans → executing-plans`.
 
 ```text
 $ challenge-plans run plan.md --type spec --profile standard --sink markdown

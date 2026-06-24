@@ -8,7 +8,7 @@
 
 **在执行一份 plan/spec 之前，用你已登录的编码 CLI 对它做多 agent 对抗式评审。无需 API key。**
 
-`challenge-plans` 编排你本机已有的订阅编码 CLI（Claude Code、Codex…）交叉拷问一份 plan/spec，把会导致后续返工的坑提前挖出来；拿不准时还能对多个选项投票。它跑在你已有的订阅上，没有按 token 的 API 费用。卡进 superpowers 计划生命周期：`writing-plans → challenge-plans → executing-plans`。
+`challenge-plans` 编排你本机已有的订阅编码 CLI（Claude Code、Codex…）交叉拷问一份 plan/spec，把会导致后续返工的坑提前挖出来；拿不准时还能对多个选项投票。它也能审一份 `git diff`、当一次轻量 **code review**，并可作为 **agent skill** 接入。它跑在你已有的订阅上，没有按 token 的 API 费用。卡进 superpowers 计划生命周期：`writing-plans → challenge-plans → executing-plans`。
 
 ```text
 $ challenge-plans run plan.md --type spec --profile standard --sink markdown
