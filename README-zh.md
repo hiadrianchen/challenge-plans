@@ -143,6 +143,22 @@ challenge-plans 不是单一功能，而是同一引擎上的两种模式。**�
 
 challenge-plans 驱动你已登录的任一订阅编码 CLI —— 如 **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`）。**不绑定任何特定一家。** 有**两个不同厂商**时可跨家族互验；只有一个时结论保持 advisory。无 API key、本工具不产生 per-token API 费用（`doctor` 只验登录、不查账单；用量仍计入你正常订阅额度）。
 
+## 和你的计划工作流衔接
+
+challenge-plans 是「**执行前先评审**」这一步——它能和你可能已经在用的计划类 skill 拼起来用。
+
+**[superpowers](https://github.com/obra/superpowers)** 的流程是 `brainstorming → writing-plans → executing-plans`。当 `writing-plans` 把计划存到 `docs/superpowers/plans/<日期>-<功能>.md` 后，执行前先评审它：
+
+```bash
+challenge-plans run docs/superpowers/plans/<日期>-<功能>.md --type spec --sink markdown
+```
+
+这正好插在 superpowers 自带的「执行前 review」那个缝上——但把它原本单个 subagent 的检查，升级成**多 CLI、跨家族、可投票**的一遍。把存活异议喂回 `writing-plans`，再跑 `executing-plans`。（它是外部工具——没有谁会自动触发它；由你或你的 agent 把它接到这个缝里，并读**实际**保存的计划路径，因为用户偏好可能改路径。专门的 `--type plan` rubric 在路线图上；现在用 `--type spec` 即可。）
+
+**[grill-me](https://github.com/mattpocock/skills)**（mattpocock/skills）是互补的、跑在**更早**：`/grill-me` 在计划**还在成形**时一次一个问题地逼问你、对齐人和 agent——它打磨的是理解，不产文件。等你有了成文的 plan 或 PRD，再把那份产物交给 challenge-plans。一句话：**grill-me 靠访谈打磨（单 agent、你在环里）→ challenge-plans 压测草稿（多 agent、靠证据）**。
+
+**对 agent：** 一旦有了计划文件，在触发执行之前先用 `challenge-plans` skill 审它，把存活的、跨家族验证过的异议作为你的评审建议呈现，而不是直接给计划盖章放行。
+
 ## 状态
 
 **v1 — 可用。** 两模式端到端可跑，对真实 spec 验证过、由 pytest 套件钉住不变量，经多轮跨 agent 对抗 review 加固。

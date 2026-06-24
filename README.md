@@ -143,6 +143,22 @@ These traps are ones a naive multi-agent setup almost always falls into — and 
 
 challenge-plans drives whatever subscription coding CLI you already have logged in — e.g. **Claude Code** (`claude`) or **OpenAI Codex** (`codex`). You don't need any specific one. With **two different vendors** it can cross-verify findings; with one, results stay advisory. No API keys, and no per-token API charges from this tool (`doctor` checks the CLIs are logged in, not your billing; usage still counts against your normal subscription limits).
 
+## Works with your planning workflow
+
+challenge-plans is the **"review before you execute"** step — it composes with the planning skills you may already use.
+
+**[superpowers](https://github.com/obra/superpowers)** runs `brainstorming → writing-plans → executing-plans`. After `writing-plans` saves your plan to `docs/superpowers/plans/<date>-<feature>.md`, review it before execution:
+
+```bash
+challenge-plans run docs/superpowers/plans/<date>-<feature>.md --type spec --sink markdown
+```
+
+This slots exactly where superpowers' own pre-execution review sits — but upgrades that single-subagent check to a **multi-CLI, cross-family, vote-capable** pass. Feed surviving objections back into `writing-plans`, then run `executing-plans`. (It's an external tool — nothing auto-invokes it; you or your agent wire it into the seam, and read the *actual* saved plan path since user prefs can change it. A dedicated `--type plan` rubric is on the roadmap; `--type spec` works today.)
+
+**[grill-me](https://github.com/mattpocock/skills)** (mattpocock/skills) is complementary and runs *earlier*: `/grill-me` interviews you one question at a time to align with the agent *while the plan is still forming* — it sharpens understanding, it doesn't emit a file. Once you've got a written plan or PRD, hand that artifact to challenge-plans. In short: **grill-me sharpens by interview (one agent, you in the loop) → challenge-plans stress-tests the draft (many agents, evidence-based)**.
+
+**For agents:** once a plan file exists, invoke the `challenge-plans` skill on it before triggering execution, and present the surviving, cross-verified objections as your review recommendation instead of rubber-stamping the plan.
+
 ## Status
 
 **v1 — usable.** Both modes work end-to-end, validated against a real spec and pinned by a pytest suite, hardened across multiple cross-agent adversarial-review rounds.

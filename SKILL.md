@@ -33,3 +33,9 @@ challenge-plans run <artifact> --type spec --profile standard --sink markdown --
 ## Presenting to the user
 
 Surface the verdict + **surviving objections (✓ verified vs ? unverified)** + missing required fields as "my cross-review recommendation", then let the user decide — rather than handing them a bare decision. See [README.md](README.md) for the full picture.
+
+## Composing with planning skills
+
+- **superpowers** (`writing-plans → executing-plans`): after `writing-plans` saves a plan file (default `docs/superpowers/plans/<date>-<feature>.md` — read the actual path), run `challenge-plans run <plan> --type spec` **before** `executing-plans`. It occupies the same pre-execution review seam as superpowers' built-in `plan-document-reviewer`, but as a multi-CLI cross-family pass. Route surviving objections back into the plan, then execute.
+- **grill-me** (mattpocock/skills): complementary and earlier — it interactively aligns the user while the plan forms (no file output). Run challenge-plans *after* a written plan/PRD exists.
+- Nothing auto-invokes challenge-plans; the calling agent wires it into the seam. `--type plan`/`decision` rubrics are pending — use `--type spec` for plan-like prose today.
