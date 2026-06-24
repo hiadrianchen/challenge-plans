@@ -557,3 +557,77 @@ def test_save_provenance_never_overwrites(tmp_path, monkeypatch):
     paths = [cli._save_provenance(m, str(tmp_path)) for _ in range(3)]
     assert len(set(paths)) == 3                      # collision loop -> distinct -1/-2 suffixes
     assert all(pathlib.Path(p).exists() for p in paths)
+
+
+# ── schema-repair retry: a transient malformed reply is retried, not silently dropped ──
+def test_schema_repair_retry_recovers_a_voter(tmp_path):
+    from challenge_plans.adapters import CaptureResult
+    # medium severity so the Verifier (high/critical only) doesn't add an invoke and skew the count.
+    good = cbody([concern(ft="hidden_dependency", sev="medium")])
+
+    class _Flaky:
+        backend = "flaky"
+        model_family = "flaky"
+
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, prompt, spec):
+            self.calls += 1
+            if self.calls == 1:
+                return CaptureResult(True, "oops not json\n" + M)   # unparseable -> triggers retry
+            return CaptureResult(True, good)
+
+    a = _Flaky()
+    m = run_challenge(mk(tmp_path), "spec", "fast", [a])
+    assert a.calls == 2                                       # one failure + one repair retry
+    assert m["panel_integrity"]["collected_voters"] == 1     # voter recovered, not dropped
+    assert any(v.get("repaired") for v in m["voters"])       # flagged as repaired
+    real = [c for c in m["concerns"] if c["raised_by"] != ["preflight"]]
+    assert len(real) == 1 and real[0]["failure_type"] == "hidden_dependency"
+
+
+def test_schema_repair_does_not_retry_capture_failure(tmp_path):
+    # A timeout / capture failure must NOT be retried (gate caught: re-invoking just burns another
+    # timeout). Only a captured-but-unparseable reply is retried.
+    from challenge_plans.adapters import CaptureResult
+    from challenge_plans.schema import CaptureFailureReason
+
+    class _TimingOut:
+        backend = "to"
+        model_family = "to"
+
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, prompt, spec):
+            self.calls += 1
+            return CaptureResult(False, "", CaptureFailureReason.TIMEOUT)
+
+    a = _TimingOut()
+    m = run_challenge(mk(tmp_path), "spec", "fast", [a])
+    assert a.calls == 1                                      # capture failure is not retried
+    assert m["panel_integrity"]["collected_voters"] == 0
+    assert m["voters"][0]["status"] == "capture_failed"
+
+
+def test_schema_repair_retry_still_unparseable_drops_voter(tmp_path):
+    # Captured but unparseable both times -> retried once, then dropped as parse_error (not looping).
+    from challenge_plans.adapters import CaptureResult
+
+    class _AlwaysBad:
+        backend = "bad"
+        model_family = "bad"
+
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, prompt, spec):
+            self.calls += 1
+            return CaptureResult(True, "still not json\n" + M)
+
+    a = _AlwaysBad()
+    m = run_challenge(mk(tmp_path), "spec", "fast", [a])
+    assert a.calls == 2                                      # one try + one repair retry, then give up
+    assert m["panel_integrity"]["collected_voters"] == 0
+    assert m["voters"][0]["status"] == "parse_error"

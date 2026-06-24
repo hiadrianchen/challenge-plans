@@ -4,8 +4,9 @@ parse into Concerns → dedup by canonical key (keep strictest) → single verdi
 Multi-persona across the available subscription CLIs, run in parallel. `--deep` runs multiple
 rounds: each later round sees the concerns already found and is asked for NEW ones only, and the
 loop stops when a round surfaces nothing new (convergence) or hits the round cap. A cross-family
-Verifier and a minimal frontmatter/field preflight are implemented; current limitations: no
-idle-timeout (wall-clock only) and no parse retry. See the CLI `--enforce` flag and the manifest.
+Verifier and a minimal frontmatter/field preflight are implemented; a malformed challenger reply
+gets one schema-repair retry before the voter is dropped. Current limitation: no idle-timeout
+(wall-clock only). See the CLI `--enforce` flag and the manifest.
 """
 from __future__ import annotations
 
@@ -31,6 +32,12 @@ _PROFILE_MAX_ROUNDS = {"fast": 1, "standard": 1, "deep": 3}
 def _prior_summaries(concerns_by_key: dict) -> list[str]:
     """Compact list of already-found concerns to hand the next --deep round (so it finds NEW ones)."""
     return [f"{c.artifact_span} {c.failure_type}: {c.title}" for c in concerns_by_key.values()]
+
+
+# Schema-repair: appended on a single retry when a challenger's output didn't parse, to recover a
+# transient malformed/truncated reply instead of silently dropping that voter.
+_REPAIR_HINT = ("\n\nIMPORTANT: your previous reply could not be parsed. Reply with ONLY the strict "
+                "JSON object specified above and the final marker line — no other text.")
 _SPAN_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
 _DECODER = json.JSONDecoder()
 
@@ -172,7 +179,17 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                              model_family=adapter.model_family, persona=persona)
             prompt = build_challenger_prompt(numbered, rubric.artifact_noun, rubric.personas[persona],
                                              rubric.failure_types, max_findings, prior=_prior)
-            return voter_id, spec, adapter.invoke(prompt, spec)
+            cap = adapter.invoke(prompt, spec)
+            raw = _extract_json(strip_marker(cap.text)) if cap.ok else None
+            repaired = False
+            # Retry ONLY on a parse failure (captured output but unparseable JSON). A capture failure
+            # (timeout / truncation) is NOT retried — re-invoking would just burn another timeout.
+            if cap.ok and raw is None:
+                cap2 = adapter.invoke(prompt + _REPAIR_HINT, spec)
+                raw2 = _extract_json(strip_marker(cap2.text)) if cap2.ok else None
+                if raw2 is not None:
+                    cap, raw, repaired = cap2, raw2, True
+            return voter_id, spec, cap, raw, repaired
 
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(voters)) as ex:
@@ -181,7 +198,7 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                 results.append(fut.result())
 
         new_keys = 0
-        for voter_id, spec, cap in results:
+        for voter_id, spec, cap, raw, repaired in results:
             meta = {"voter_id": voter_id, "backend": spec.backend, "round": rnd,
                     "model_family": spec.model_family, "transport": spec.transport}
             if not cap.ok:
@@ -190,7 +207,6 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                 meta["status"] = "capture_failed"
                 voters_meta.append(meta)
                 continue
-            raw = _extract_json(strip_marker(cap.text))
             if raw is None:
                 panel.missing.append({"voter": voter_id, "reason": "parse_error"})
                 meta["status"] = "parse_error"
@@ -199,6 +215,8 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
             panel.collected_voters += 1
             families.add(spec.model_family)
             meta["status"] = "ok"
+            if repaired:
+                meta["repaired"] = True
             voters_meta.append(meta)
             for c in _parse_concerns(raw, voter_id, nlines, dropped, valid_failure_types):
                 existing = concerns_by_key.get(c.key)
