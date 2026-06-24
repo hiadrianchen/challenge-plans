@@ -26,9 +26,26 @@
 - 📝 **一份成型的 spec / 设计稿**（动手前）—— `--type spec`。
 - 🔧 **一次代码改动**（轻量 review）—— `--type diff`。而当你**在几个选项间拿不准**时，`weigh` 用加权、暴露异议的议事来投票选。
 
+## 快速开始
+
+**最省事——交给你的 agent。** 对它说：
+
+> 从 https://github.com/hiadrianchen/challenge-plans 安装 challenge-plans，然后跑 `challenge-plans doctor`。
+
+它会装好包并报告哪些后端就绪。
+
+**或者自己装**（Python ≥ 3.10）：
+
+```bash
+pip install challenge-plans      # 或：pipx install challenge-plans  ·  uvx challenge-plans doctor
+challenge-plans doctor           # 看哪些 CLI 已登录
+```
+
+至少有一个已登录的 CLI —— **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`）；两个不同厂商解锁跨家族验证。**作为 agent skill**：把 [SKILL.md](SKILL.md) 放到你 agent 发现 skill 的目录。（要改源码？`git clone … && pip install -e .`。）
+
 ## 看它跑
 
-拿一份粗糙的京都旅行攻略（[`examples/plan-sample.md`](examples/plan-sample.md)）：
+下面是「**任何计划**」这一种情形——上面三种之一——用在一份粗糙的京都旅行攻略上（[`examples/plan-sample.md`](examples/plan-sample.md)）：
 
 ```text
 $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
@@ -60,24 +77,11 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 
 `--profile fast` 跑一个评审，`standard` 跑全 3 个，`deep` 多轮直到没有**新**异议存活。
 
-## 快速开始
-
-**最省事——交给你的 agent。** 对它说：
-
-> 从 https://github.com/hiadrianchen/challenge-plans 安装 challenge-plans，然后跑 `challenge-plans doctor`。
-
-它会装好包并报告哪些后端就绪。
-
-**或者自己装**（Python ≥ 3.10）：
-
-```bash
-pip install challenge-plans      # 或：pipx install challenge-plans  ·  uvx challenge-plans doctor
-challenge-plans doctor           # 看哪些 CLI 已登录
-```
-
-至少有一个已登录的 CLI —— **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`）；两个不同厂商解锁跨家族验证。**作为 agent skill**：把 [SKILL.md](SKILL.md) 放到你 agent 发现 skill 的目录。（要改源码？`git clone … && pip install -e .`。）
-
 ## 用法
+
+**作为 skill，你不用记参数——直接问 agent。** 说「用 challenge-plans 审下这个计划」「这份 spec 能动手了吗」，甚至「challenge-plans 怎么用」——它会替你挑模式、挑命令，并把存活的异议带回来。
+
+**想直接命令行跑？** 对照下表：
 
 | 我想做… | 跑这条 |
 |---|---|

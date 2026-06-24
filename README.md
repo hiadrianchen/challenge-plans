@@ -26,9 +26,26 @@ You don't have to write specs to use this. Three things it does:
 - 📝 **A drafted spec or design doc** before you build — `--type spec`.
 - 🔧 **A code change** as a lightweight review — `--type diff`. And when you're **torn between options**, `weigh` votes across them with weighted, dissent-exposing deliberation.
 
+## Quickstart
+
+**Easiest — hand it to your agent.** Tell it:
+
+> Install challenge-plans from https://github.com/hiadrianchen/challenge-plans and run `challenge-plans doctor`.
+
+It sets up the package and reports which backends are ready.
+
+**Or install it yourself** (Python ≥ 3.10):
+
+```bash
+pip install challenge-plans      # or: pipx install challenge-plans  ·  uvx challenge-plans doctor
+challenge-plans doctor           # which CLIs are logged in
+```
+
+Bring at least one logged-in CLI — **Claude Code** (`claude`) or **OpenAI Codex** (`codex`); two different vendors unlock cross-family verification. To use it **as an agent skill**, drop [SKILL.md](SKILL.md) where your agent discovers skills. (Developing? `git clone … && pip install -e .`.)
+
 ## See it work
 
-Point it at a rough Kyoto-trip plan ([`examples/plan-sample.md`](examples/plan-sample.md)):
+Here's the **"any plan"** scenario — one of the three above — on a rough Kyoto-trip plan ([`examples/plan-sample.md`](examples/plan-sample.md)):
 
 ```text
 $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
@@ -60,24 +77,11 @@ Each line is one **tagged objection** — anchored to a line, raised by one revi
 
 `--profile fast` runs one reviewer, `standard` all three, `deep` several rounds until no *new* objection survives.
 
-## Quickstart
-
-**Easiest — hand it to your agent.** Tell it:
-
-> Install challenge-plans from https://github.com/hiadrianchen/challenge-plans and run `challenge-plans doctor`.
-
-It sets up the package and reports which backends are ready.
-
-**Or install it yourself** (Python ≥ 3.10):
-
-```bash
-pip install challenge-plans      # or: pipx install challenge-plans  ·  uvx challenge-plans doctor
-challenge-plans doctor           # which CLIs are logged in
-```
-
-Bring at least one logged-in CLI — **Claude Code** (`claude`) or **OpenAI Codex** (`codex`); two different vendors unlock cross-family verification. To use it **as an agent skill**, drop [SKILL.md](SKILL.md) where your agent discovers skills. (Developing? `git clone … && pip install -e .`.)
-
 ## Usage
+
+**As a skill, you don't memorize flags — just ask your agent.** Say *"review this plan with challenge-plans"*, *"is this spec ready to build?"*, or even *"how do I use challenge-plans?"* — it picks the mode and command for you and brings back the surviving objections.
+
+**Running it directly?** Here's the map:
 
 | I want to… | Run |
 |---|---|
