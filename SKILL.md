@@ -25,7 +25,7 @@ challenge-plans run <artifact> --type spec --profile standard --sink markdown --
 # From a source checkout instead (not pip-installed): PYTHONPATH=src python3 -m challenge_plans.cli <args>
 ```
 
-- `--type spec|diff` (plan/decision rubric still pending — those exit 2 by design). `diff` reviews a raw `git diff` for regression/correctness/test-coverage with the same verdict pipeline.
+- `--type spec|diff|plan` (`decision` rubric still pending — exits 2 by design). `diff` reviews a raw `git diff`; **`plan` reviews ANY plan (a trip, a launch, a hire — not just dev specs)** with domain-neutral failure types (missing success criteria / ignored constraint / unaddressed risk / sequencing gap / unstated assumption / goal misalignment / irreversibility / no fallback) and feasibility·risk·goal-alignment lenses. All run the same verdict pipeline.
 - `--profile fast|standard|deep`, `--sink stdout|markdown`, `--enforce` (non-approve verdicts exit non-zero; default advisory exits 0).
 - `--lang <code>` (default `en`): write the review prose in the user's language, e.g. `--lang zh`. **Set this from the user's language** so the whole review comes back localized; JSON keys / enums / `L12-15` anchors stay stable. Equivalent to exporting `CHALLENGE_PLANS_LANG`.
 - Output: a 6-state verdict + surviving objections. `[sev✓]` = cross-family Verifier-confirmed, may hard-gate; `[sev?]` = unverified, advisory only.

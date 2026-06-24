@@ -58,6 +58,7 @@ challenge-plans run examples/spec-sample.md --type spec --sink markdown   # 在�
 challenge-plans doctor                                                                 # 哪些后端就绪
 challenge-plans run path/to/spec.md --type spec --profile standard --sink markdown     # 硬化一份 plan/spec
 challenge-plans run change.diff --type diff --sink markdown                             # 审一份 git diff
+challenge-plans run trip.md --type plan --sink markdown                                  # 审任何计划（旅行/上线/招聘…）
 challenge-plans weigh path/to/options.yaml --profile standard --sink markdown           # 在多个选项间投票
 challenge-plans run path/to/spec.md --enforce                                           # CI gate：非 approve 退非零
 challenge-plans run path/to/spec.md --type spec --sink markdown --lang zh                # 异议/证据用中文输出
@@ -77,9 +78,31 @@ options:
 - `--profile fast|standard|deep`、`--sink stdout|markdown`、`--enforce`（非 approve 退非零；默认 advisory 退 0）。
 - `--lang <代码>` 让人类可读输出用你的语言（默认 `en`）—— 见 [下文](#按你的语言输出)。
 - `[sev✓]` = 跨家族已验证、可硬 gate；`[sev?]` = 未验证、仅 advisory。
-- **artifact 类型：** `--type spec` 与 `--type diff` 均可用；`plan` / `decision` 保留（rubric 待补）。
+- **artifact 类型：** `--type spec`、`--type diff`、`--type plan` 均可用；`decision` 保留（rubric 待补）。
 
 bundled 的 [SKILL.md](SKILL.md) 自动把“审/QA 一份 plan/spec”路由到 `run`；投票走 `weigh` 子命令。
+
+## 例子：压测一份计划（不止代码）
+
+`--type plan` 能审**任何**你要去执行的计划——旅行、上线、招聘、搬家，不止开发 spec。拿一份粗糙的京都旅行攻略（[`examples/plan-sample.md`](examples/plan-sample.md)）：
+
+```text
+$ challenge-plans run examples/plan-sample.md --type plan --sink markdown
+
+# challenge-plans · challenge · verdict: request_changes
+- [high✓] 机票不可退，却在验证行程之前就锁死了        @L10  (irreversibility_or_high_cost, by claude:feasibility)
+- [med ] Day2 横跨全城塞了 6 个景点，基本走不完        @L4   (ignored_constraint, by gpt:risk)
+- [med ] 从没定义「什么算一趟好旅行」，无从判断行程好坏  @L1   (missing_success_criteria, by claude:goal-alignment)
+```
+
+靠两个想法工作：
+
+- **失败类型** —— 每条异议都必须贴一个标签，选自一份固定的「**计划可能错在哪**」清单（`missing_success_criteria` 没有成功标准、`ignored_constraint` 忽略现实约束、`unaddressed_risk` 没应对风险、`dependency_or_sequencing_gap` 依赖/顺序漏洞、`unstated_assumption` 没说明的假设、`goal_misalignment` 目标跑偏、`irreversibility_or_high_cost` 不可逆/高代价、`no_fallback` 没有 plan B）。不许「感觉不太行」——每条都具体、绑到行、可去重。
+- **镜头** —— 每个评审戴不同的帽子，免得都盯同一处：**feasibility**（现实约束下能不能落地）、**risk**（哪最可能出错/不可逆）、**goal-alignment**（步骤是否服务于声称的目标、哪些假设必须成立）。`--profile fast` 用一个镜头，`standard` 用全 3 个，`deep` 多轮直到没有**新**异议存活。
+
+## 为什么是工具，而不只是一段提示词？
+
+你完全可以往任何对话里粘「对抗式审一下我的计划」。它做成 CLI 的理由是**一致性**：纯提示词的 skill 会在不同 agent、不同次运行间漂——有的跑三轮、有的跑一轮；有的把超时的评审当「无异议」、有的当「inconclusive」；有的保留少数派 blocker、有的被多数压掉。challenge-plans 把评审变成**可重复的协议**：拉起评审、强制失败类型 schema、检出超时/缺票、按锚点去重、要求**跨家族**复现才能硬 gate、最后收敛成一个六态 verdict。同样的计划进去，同样形状的答案出来——可测试、由测试套件钉死，而不是看每个 agent 的心情。
 
 ### 按你的语言输出
 

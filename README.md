@@ -58,6 +58,7 @@ Or hand it to your coding agent — *"Install challenge-plans and run `challenge
 challenge-plans doctor                                                                 # which backends are ready
 challenge-plans run path/to/spec.md --type spec --profile standard --sink markdown     # harden a plan/spec
 challenge-plans run change.diff --type diff --sink markdown                             # review a git diff
+challenge-plans run trip.md --type plan --sink markdown                                  # review ANY plan (a trip, a launch, a hire)
 challenge-plans weigh path/to/options.yaml --profile standard --sink markdown           # vote across options
 challenge-plans run path/to/spec.md --enforce                                           # CI gate: non-approve exits non-zero
 challenge-plans run path/to/spec.md --type spec --sink markdown --lang zh                # findings written in Chinese
@@ -77,9 +78,31 @@ options:
 - `--profile fast|standard|deep`, `--sink stdout|markdown`, `--enforce` (non-approve verdicts exit non-zero; advisory exit 0 by default).
 - `--lang <code>` writes the human-readable output in your language (default `en`) — see [below](#output-in-your-language).
 - `[sev✓]` = cross-family verified, may hard-gate; `[sev?]` = unverified, advisory only.
-- **Artifact types:** `--type spec` and `--type diff` are supported; `plan` / `decision` are reserved (rubric pending).
+- **Artifact types:** `--type spec`, `--type diff`, and `--type plan` are supported; `decision` is reserved (rubric pending).
 
 The bundled [SKILL.md](SKILL.md) routes **review/QA** of a plan/spec to `run` automatically; option-voting is the `weigh` subcommand.
+
+## Example: stress-testing a plan (not just code)
+
+`--type plan` reviews **any** plan you're about to act on — a trip, a launch, a hire, a move — not just a dev spec. Take a rough Kyoto-trip plan ([`examples/plan-sample.md`](examples/plan-sample.md)):
+
+```text
+$ challenge-plans run examples/plan-sample.md --type plan --sink markdown
+
+# challenge-plans · challenge · verdict: request_changes
+- [high✓] Non-refundable flights locked before validating the trip  @L10  (irreversibility_or_high_cost, by claude:feasibility)
+- [med ] Day 2 packs six sights across the city — likely undoable  @L4   (ignored_constraint, by gpt:risk)
+- [med ] "A good trip" is never defined, so nothing can be judged  @L1   (missing_success_criteria, by claude:goal-alignment)
+```
+
+Two ideas do the work:
+
+- **Failure types** — every objection must be tagged with one of a fixed menu of *ways a plan can break* (`missing_success_criteria`, `ignored_constraint`, `unaddressed_risk`, `dependency_or_sequencing_gap`, `unstated_assumption`, `goal_misalignment`, `irreversibility_or_high_cost`, `no_fallback`). No vague "this feels off" — each finding is concrete, anchored to a line, and dedup-able.
+- **Lenses** — each reviewer wears a different hat so they don't all stare at the same spot: **feasibility** (can it actually be done under real constraints), **risk** (what's most likely to go wrong / is irreversible), **goal-alignment** (do the steps serve the stated goal; what assumptions must hold). `--profile fast` uses one lens, `standard` all three, `deep` runs multiple rounds until no *new* objection survives.
+
+## Why a tool, and not just a prompt?
+
+You could paste "review my plan adversarially" into any chat. The reason this is a CLI is **consistency**: a plain-prompt skill drifts between agents and runs — one does three rounds, another does one; one treats a timed-out reviewer as "no objection", another as "inconclusive"; one keeps a minority blocker, another lets the majority bury it. challenge-plans turns the review into a **repeatable protocol**: spawn the reviewers, enforce the failure-type schema, detect timeouts/missing votes, dedup by anchor, require *cross-family* reproduction before a finding can hard-gate, and resolve one 6-state verdict. Same plan in, same shape of answer out — testable and pinned by a test suite, not left to each agent's mood.
 
 ### Output in your language
 
