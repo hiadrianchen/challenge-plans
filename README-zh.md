@@ -8,7 +8,9 @@
 
 **在执行一份 plan/spec 之前，用你已登录的编码 CLI 对它做多 agent 对抗式评审。无需 API key。**
 
-`challenge-plans` 编排你本机已有的订阅编码 CLI（Claude Code、Codex…）交叉拷问一份 plan/spec，把会导致后续返工的坑提前挖出来；拿不准时还能对多个选项投票。它也能审一份 `git diff`、当一次轻量 **code review**，并可作为 **agent skill** 接入。它跑在你已有的订阅上，没有按 token 的 API 费用。卡进 superpowers 计划生命周期：`writing-plans → challenge-plans → executing-plans`。
+`challenge-plans` 编排你本机已有的订阅编码 CLI（Claude Code、Codex…）交叉拷问一份 plan/spec，把会导致返工的坑提前挖出来；拿不准时还能对多个选项投票。
+
+它也能审一份 `git diff`、当一次轻量 **code review**，并可作为 **agent skill** 接入。无 API key——跑在你已有的订阅上。卡进 superpowers 计划生命周期：`writing-plans → challenge-plans → executing-plans`。
 
 ```text
 $ challenge-plans run plan.md --type spec --profile standard --sink markdown
@@ -95,10 +97,19 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 - [med ] 从没定义「什么算一趟好旅行」，无从判断行程好坏  @L1   (missing_success_criteria, by claude:goal-alignment)
 ```
 
-靠两个想法工作：
+靠两个想法工作。
 
-- **失败类型** —— 每条异议都必须贴一个标签，选自一份固定的「**计划可能错在哪**」清单（`missing_success_criteria` 没有成功标准、`ignored_constraint` 忽略现实约束、`unaddressed_risk` 没应对风险、`dependency_or_sequencing_gap` 依赖/顺序漏洞、`unstated_assumption` 没说明的假设、`goal_misalignment` 目标跑偏、`irreversibility_or_high_cost` 不可逆/高代价、`no_fallback` 没有 plan B）。不许「感觉不太行」——每条都具体、绑到行、可去重。
-- **镜头** —— 每个评审戴不同的帽子，免得都盯同一处：**feasibility**（现实约束下能不能落地）、**risk**（哪最可能出错/不可逆）、**goal-alignment**（步骤是否服务于声称的目标、哪些假设必须成立）。`--profile fast` 用一个镜头，`standard` 用全 3 个，`deep` 多轮直到没有**新**异议存活。
+**给问题贴标签。** 不许「感觉不太行」——每条异议都必须从一份固定的「**计划可能错在哪**」清单里选一个标签，所以每条都具体、绑到行、可去重：
+
+`missing_success_criteria` 没有成功标准 · `ignored_constraint` 忽略现实约束 · `unaddressed_risk` 没应对风险 · `dependency_or_sequencing_gap` 依赖/顺序漏洞 · `unstated_assumption` 没说明的假设 · `goal_misalignment` 目标跑偏 · `irreversibility_or_high_cost` 不可逆/高代价 · `no_fallback` 没有 plan B
+
+**几个独立评审，每人只管一件事。** 不让所有 agent 都看全部，而是各给一个专属视角：
+
+- **可行性** —— 现实约束下到底能不能落地？哪一步最容易卡住？
+- **风险** —— 哪里最可能出错、代价最大、不可逆？
+- **目标对齐** —— 步骤真能达成声称的目标吗？哪些假设必须成立？
+
+`--profile fast` 跑一个评审，`standard` 跑全 3 个，`deep` 多轮直到没有**新**异议存活。
 
 ## 按你的语言输出
 

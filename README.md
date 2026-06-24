@@ -8,7 +8,9 @@
 
 **Adversarially review your plan or spec before you execute it — across the coding CLIs you already have logged in. No API keys.**
 
-`challenge-plans` orchestrates the subscription AI coding CLIs already on your machine (Claude Code, Codex, …) to cross-examine a plan/spec and surface the flaws that cause rework downstream — and to vote across options when you're unsure. It also reviews a raw `git diff` as a lightweight **code review** pass, and drops in as an **agent skill**. It runs on your existing subscriptions, so there are no per-token API charges. It slots into the superpowers plan lifecycle: `writing-plans → challenge-plans → executing-plans`.
+`challenge-plans` orchestrates the subscription AI coding CLIs already on your machine (Claude Code, Codex, …) to cross-examine a plan/spec and surface the flaws that cause rework — and to vote across options when you're unsure.
+
+It also reviews a raw `git diff` as a lightweight **code review**, and drops in as an **agent skill**. No API keys — it runs on your existing subscriptions. It slots into the superpowers plan lifecycle: `writing-plans → challenge-plans → executing-plans`.
 
 ```text
 $ challenge-plans run plan.md --type spec --profile standard --sink markdown
@@ -95,10 +97,19 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 - [med ] "A good trip" is never defined, so nothing can be judged  @L1   (missing_success_criteria, by claude:goal-alignment)
 ```
 
-Two ideas do the work:
+Two ideas make it work.
 
-- **Failure types** — every objection must be tagged with one of a fixed menu of *ways a plan can break* (`missing_success_criteria`, `ignored_constraint`, `unaddressed_risk`, `dependency_or_sequencing_gap`, `unstated_assumption`, `goal_misalignment`, `irreversibility_or_high_cost`, `no_fallback`). No vague "this feels off" — each finding is concrete, anchored to a line, and dedup-able.
-- **Lenses** — each reviewer wears a different hat so they don't all stare at the same spot: **feasibility** (can it actually be done under real constraints), **risk** (what's most likely to go wrong / is irreversible), **goal-alignment** (do the steps serve the stated goal; what assumptions must hold). `--profile fast` uses one lens, `standard` all three, `deep` runs multiple rounds until no *new* objection survives.
+**Tagged findings.** No vague "this feels off" — every objection is tagged with one of a fixed set of *ways a plan breaks*, so each finding is concrete, line-anchored, and de-duplicable:
+
+`missing_success_criteria` · `ignored_constraint` · `unaddressed_risk` · `dependency_or_sequencing_gap` · `unstated_assumption` · `goal_misalignment` · `irreversibility_or_high_cost` · `no_fallback`
+
+**Independent reviewers, each with one job.** Rather than every agent looking at everything, each takes a single dedicated perspective:
+
+- **Feasibility** — can it actually be done under real constraints? which step stalls?
+- **Risk** — what's most likely to go wrong, costly, or irreversible?
+- **Goal-alignment** — do the steps serve the stated goal? which assumptions must hold?
+
+`--profile fast` runs one reviewer, `standard` all three, `deep` runs several rounds until no *new* objection survives.
 
 ## Output in your language
 
