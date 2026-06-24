@@ -38,13 +38,19 @@ $ challenge-plans run plan.md --type spec --profile standard --sink markdown
 需要 Python ≥ 3.10（PyYAML 自动安装）。至少有一个已登录的编码 CLI —— **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`）；两个不同厂商解锁跨家族验证。
 
 ```bash
-git clone https://github.com/hiadrianchen/challenge-plans && cd challenge-plans
-pip install -e .                                                          # 暴露 `challenge-plans` 命令
-challenge-plans doctor                                                    # 看哪些后端 CLI 已登录
-challenge-plans run examples/spec-sample.md --type spec --sink markdown   # 在自带样例上跑出一个 verdict
+pip install challenge-plans      # 或：pipx install challenge-plans  ·  uvx challenge-plans doctor
+challenge-plans doctor           # 看哪些后端 CLI 已登录
+challenge-plans run your-plan.md --type spec --sink markdown   # 对你自己的 plan/spec 跑出 verdict
 ```
 
-也可以把 repo 交给你的编码 agent —— *“从这个 repo 安装并配置好 challenge-plans，然后跑 `challenge-plans doctor`”* —— 它会替你做上面这些。**作为 agent skill**：把 [SKILL.md](SKILL.md) 放到你 agent 发现 skill 的目录即可。
+想跑自带样例、或想改源码？改用 clone：
+
+```bash
+git clone https://github.com/hiadrianchen/challenge-plans && cd challenge-plans && pip install -e .
+challenge-plans run examples/spec-sample.md --type spec --sink markdown   # 在自带样例上跑出 verdict
+```
+
+也可以把它交给你的编码 agent —— *“安装 challenge-plans 并跑 `challenge-plans doctor`”* —— 它会替你做上面这些。**作为 agent skill**：把 [SKILL.md](SKILL.md) 放到你 agent 发现 skill 的目录即可。
 
 ## 使用
 

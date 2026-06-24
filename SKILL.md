@@ -17,11 +17,12 @@ Harden a plan/spec in multi-agent adversarial review before execution, to reduce
 ## Run
 
 ```bash
-cd challenge-plans
-PYTHONPATH=src python3 -m challenge_plans.cli doctor   # check adapter login state first
-PYTHONPATH=src python3 -m challenge_plans.cli run <artifact> --type spec --profile standard --sink markdown
-# uvx form: uvx --from . challenge-plans run <artifact> --type spec --profile standard --sink markdown
-# code-diff gate: git diff > change.diff && ... run change.diff --type diff --profile standard --sink markdown
+# Installed from PyPI (pip install challenge-plans) — the console command is available directly:
+challenge-plans doctor                                                            # check adapter login state first
+challenge-plans run <artifact> --type spec --profile standard --sink markdown     # review a plan/spec
+challenge-plans run <artifact> --type spec --profile standard --sink markdown --lang zh   # localized output
+# code-diff gate:  git diff > change.diff && challenge-plans run change.diff --type diff --sink markdown
+# From a source checkout instead (not pip-installed): PYTHONPATH=src python3 -m challenge_plans.cli <args>
 ```
 
 - `--type spec|diff` (plan/decision rubric still pending — those exit 2 by design). `diff` reviews a raw `git diff` for regression/correctness/test-coverage with the same verdict pipeline.

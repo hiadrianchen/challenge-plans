@@ -38,13 +38,19 @@ $ challenge-plans run plan.md --type spec --profile standard --sink markdown
 Requires Python ≥ 3.10 (PyYAML installs automatically). Bring at least one logged-in coding CLI — **Claude Code** (`claude`) or **OpenAI Codex** (`codex`); two different vendors unlock cross-family verification.
 
 ```bash
-git clone https://github.com/hiadrianchen/challenge-plans && cd challenge-plans
-pip install -e .                                                          # exposes the `challenge-plans` command
-challenge-plans doctor                                                    # which backend CLIs are logged in
-challenge-plans run examples/spec-sample.md --type spec --sink markdown   # see a verdict on the bundled sample
+pip install challenge-plans      # or: pipx install challenge-plans  ·  uvx challenge-plans doctor
+challenge-plans doctor           # which backend CLIs are logged in
+challenge-plans run your-plan.md --type spec --sink markdown   # get a verdict on your own plan/spec
 ```
 
-Hand the repo to your coding agent instead — *"Install and set up challenge-plans from this repo, then run `challenge-plans doctor`"* — and it'll do the above. To use it **as an agent skill**, drop [SKILL.md](SKILL.md) where your agent discovers skills.
+Want the bundled sample, or to hack on it? Clone instead:
+
+```bash
+git clone https://github.com/hiadrianchen/challenge-plans && cd challenge-plans && pip install -e .
+challenge-plans run examples/spec-sample.md --type spec --sink markdown   # verdict on the bundled sample
+```
+
+Or hand it to your coding agent — *"Install challenge-plans and run `challenge-plans doctor`"* — and it'll do the above. To use it **as an agent skill**, drop [SKILL.md](SKILL.md) where your agent discovers skills.
 
 ## Use
 
