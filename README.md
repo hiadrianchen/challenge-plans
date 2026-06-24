@@ -31,6 +31,7 @@ $ challenge-plans run plan.md --type spec --profile standard --sink markdown
 - 🧪 **Evidence beats headcount** — a minority objection with a reproduction can override a majority vote; correctness is not decided by voting.
 - 🤝 **Cross-family verification** — an objection only earns hard-gate authority (`✓`) when an *independent model family* reproduces it with concrete, line-anchored evidence. Single-model claims stay advisory.
 - 🛡️ **Guards 7 known multi-agent failure modes** — vote loss, option anchoring, premature hand-off, majority-over-minority, single-round complacency, false consensus, false convergence. Each was hit (and fixed) while building this tool with its own adversarial process.
+- 🌍 **Reads in your language** — the codebase is English, but `--lang zh` (or `ja`, `de`, `fr`, …) makes every reviewer write its findings in your language while JSON keys and line anchors stay machine-stable. One flag, no separate build — see [Output in your language](#output-in-your-language).
 
 ## Quickstart
 
@@ -53,6 +54,7 @@ challenge-plans run path/to/spec.md --type spec --profile standard --sink markdo
 challenge-plans run change.diff --type diff --sink markdown                             # review a git diff
 challenge-plans weigh path/to/options.yaml --profile standard --sink markdown           # vote across options
 challenge-plans run path/to/spec.md --enforce                                           # CI gate: non-approve exits non-zero
+challenge-plans run path/to/spec.md --type spec --sink markdown --lang zh                # findings written in Chinese
 # not pip-installed? prefix with: PYTHONPATH=src python3 -m challenge_plans.cli ...
 ```
 
@@ -67,10 +69,24 @@ options:
 ```
 
 - `--profile fast|standard|deep`, `--sink stdout|markdown`, `--enforce` (non-approve verdicts exit non-zero; advisory exit 0 by default).
+- `--lang <code>` writes the human-readable output in your language (default `en`) — see [below](#output-in-your-language).
 - `[sev✓]` = cross-family verified, may hard-gate; `[sev?]` = unverified, advisory only.
 - **Artifact types:** `--type spec` and `--type diff` are supported; `plan` / `decision` are reserved (rubric pending).
 
 The bundled [SKILL.md](SKILL.md) routes **review/QA** of a plan/spec to `run` automatically; option-voting is the `weigh` subcommand.
+
+### Output in your language
+
+challenge-plans ships an English codebase, but the reviewers can answer in **any** language — just add `--lang`:
+
+```bash
+challenge-plans run plan.md --type spec --lang zh     # objections, evidence, reproductions in Chinese
+challenge-plans weigh options.yaml --lang ja          # deliberation reasons in Japanese
+```
+
+`--lang` only switches the **human-readable prose** (steelman, titles, evidence, reproductions, vote reasons). JSON keys, enum values, and `L12-15` line anchors stay verbatim, so parsing, dedup, and CI gates are unaffected. It's equivalent to exporting `CHALLENGE_PLANS_LANG` once. There's no separate translated build to maintain — the same English source localizes on demand.
+
+**As an agent skill:** your agent just passes `--lang <your-language>` and the whole cross-review comes back localized. The bundled [SKILL.md](SKILL.md) documents the flag so the calling agent can set it from the user's language automatically.
 
 ## Two modes
 

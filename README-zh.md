@@ -31,6 +31,7 @@ $ challenge-plans run plan.md --type spec --profile standard --sink markdown
 - 🧪 **证据胜过人数** —— 一条带可复现反证的少数派异议可以压过多数票；正确性不靠投票决定。
 - 🤝 **跨家族验证** —— 一条异议只有当**另一个独立模型家族**用具体、带行锚的证据复现后，才获得硬 gate 资格（`✓`）；单模型声明只算 advisory。
 - 🛡️ **内建防住 7 个多 agent 编排失败模式** —— 票据丢失、选项锚定、半途甩锅、多数压少数、单轮即收、虚假共识、假收敛。每一个都是开发本工具时用它自己的对抗流程真实踩中并修掉的。
+- 🌍 **按你的语言输出** —— 源码是英文，但 `--lang zh`（或 `ja`、`de`、`fr`…）让每个评审都用你的语言写结论，而 JSON 键与行锚保持机器稳定。一个参数搞定，不另维护翻译版本 —— 见 [按你的语言输出](#按你的语言输出)。
 
 ## 快速开始
 
@@ -53,6 +54,7 @@ challenge-plans run path/to/spec.md --type spec --profile standard --sink markdo
 challenge-plans run change.diff --type diff --sink markdown                             # 审一份 git diff
 challenge-plans weigh path/to/options.yaml --profile standard --sink markdown           # 在多个选项间投票
 challenge-plans run path/to/spec.md --enforce                                           # CI gate：非 approve 退非零
+challenge-plans run path/to/spec.md --type spec --sink markdown --lang zh                # 异议/证据用中文输出
 # 未 pip 安装时前缀：PYTHONPATH=src python3 -m challenge_plans.cli ...
 ```
 
@@ -67,10 +69,24 @@ options:
 ```
 
 - `--profile fast|standard|deep`、`--sink stdout|markdown`、`--enforce`（非 approve 退非零；默认 advisory 退 0）。
+- `--lang <代码>` 让人类可读输出用你的语言（默认 `en`）—— 见 [下文](#按你的语言输出)。
 - `[sev✓]` = 跨家族已验证、可硬 gate；`[sev?]` = 未验证、仅 advisory。
 - **artifact 类型：** `--type spec` 与 `--type diff` 均可用；`plan` / `decision` 保留（rubric 待补）。
 
 bundled 的 [SKILL.md](SKILL.md) 自动把“审/QA 一份 plan/spec”路由到 `run`；投票走 `weigh` 子命令。
+
+### 按你的语言输出
+
+challenge-plans 源码是英文的，但评审可以用**任意**语言作答 —— 加上 `--lang` 即可：
+
+```bash
+challenge-plans run plan.md --type spec --lang zh     # 异议、证据、复现用中文
+challenge-plans weigh options.yaml --lang ja          # 议事理由用日语
+```
+
+`--lang` 只切换**人类可读的文字**（steelman、标题、证据、复现、投票理由）。JSON 键、枚举值、`L12-15` 行锚保持原样，所以解析、去重、CI gate 都不受影响。等价于设一次 `CHALLENGE_PLANS_LANG`。没有另一份翻译版本要维护 —— 同一份英文源按需本地化。
+
+**作为 agent skill：** agent 只要传 `--lang <用户语言>`，整份交叉 review 就用该语言返回。bundled 的 [SKILL.md](SKILL.md) 写明了这个参数，方便调用 agent 据用户语言自动设置。
 
 ## 两种模式
 

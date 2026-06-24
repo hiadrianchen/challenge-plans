@@ -26,6 +26,7 @@ PYTHONPATH=src python3 -m challenge_plans.cli run <artifact> --type spec --profi
 
 - `--type spec|diff` (plan/decision rubric still pending — those exit 2 by design). `diff` reviews a raw `git diff` for regression/correctness/test-coverage with the same verdict pipeline.
 - `--profile fast|standard|deep`, `--sink stdout|markdown`, `--enforce` (non-approve verdicts exit non-zero; default advisory exits 0).
+- `--lang <code>` (default `en`): write the review prose in the user's language, e.g. `--lang zh`. **Set this from the user's language** so the whole review comes back localized; JSON keys / enums / `L12-15` anchors stay stable. Equivalent to exporting `CHALLENGE_PLANS_LANG`.
 - Output: a 6-state verdict + surviving objections. `[sev✓]` = cross-family Verifier-confirmed, may hard-gate; `[sev?]` = unverified, advisory only.
 
 ## Presenting to the user
