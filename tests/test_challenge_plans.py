@@ -486,3 +486,27 @@ def test_version_matches_pyproject():
     pp = pathlib.Path(challenge_plans.__file__).resolve().parents[2] / "pyproject.toml"
     declared = re.search(r'(?m)^version = "([^"]+)"', pp.read_text(encoding="utf-8")).group(1)
     assert challenge_plans.__version__ == declared
+
+
+# ── --strict hard gate (review caught: discuss exits 0 under --enforce = looks gated, isn't) ──
+def test_strict_gate_only_clean_approve_passes():
+    from challenge_plans.cli import _exit_code
+    # Today --enforce lets discuss pass (advisory verdict); --strict makes it fail.
+    assert _exit_code("discuss", enforce=False) == 0
+    assert _exit_code("discuss", enforce=True) == 0
+    assert _exit_code("discuss", enforce=False, strict=True) == 1
+    assert _exit_code("approve_with_unverified_timeouts", enforce=True) == 0
+    assert _exit_code("approve_with_unverified_timeouts", enforce=False, strict=True) == 1
+    # Only a clean approve passes a strict gate; request_changes/schema_invalid still fail.
+    assert _exit_code("approve", enforce=False, strict=True) == 0
+    assert _exit_code("request_changes", enforce=False, strict=True) == 1
+    assert _exit_code("schema_invalid", enforce=False, strict=True) == 2
+
+
+def test_parser_wires_strict_and_strict_overrides_enforce():
+    # The self-review gate flagged that the argparse wiring + flag precedence were untested.
+    from challenge_plans.cli import _exit_code, build_parser
+    assert build_parser().parse_args(["run", "x.md", "--strict"]).strict is True
+    assert build_parser().parse_args(["run", "x.md"]).strict is False
+    # strict takes precedence over enforce: a discuss verdict still fails the hard gate.
+    assert _exit_code("discuss", enforce=True, strict=True) == 1

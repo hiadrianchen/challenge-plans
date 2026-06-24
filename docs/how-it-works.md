@@ -75,9 +75,8 @@ Concern dedup is exact-anchor only; no idle-timeout (wall-clock only); deliberat
 
 ## Roadmap
 
-Honest about what isn't built yet. challenge-plans is **advisory-grade** today — great for a human/agent review pass, not yet a hard CI quality gate. Planned, roughly in order:
+Honest about what isn't built yet. By default challenge-plans is **advisory** (a human/agent review pass); `--strict` turns it into a hard gate, but the gate's strength is still LLM cross-model confirmation, not mechanical proof. Planned, roughly in order:
 
-- **`--strict` gate mode** — let `discuss` (and optionally `approve_with_unverified_timeouts`) exit non-zero, so a single-family run can't look gated while passing. Today `--enforce` exits non-zero only on `request_changes` / `inconclusive` / `schema_invalid`.
 - **Mechanical verification for `--type diff`** — run tests / typecheck / lint / static analysis (not just a second LLM) before a code finding can hard-gate. Today the `✓` is cross-model confirmation, not a test run.
 - **Persistent run provenance** — write raw outputs, model + version, artifact hash, and verdict to a store for audit and replay.
 - **Robust source anchors** — block id / content hash / git hunk range instead of bare line numbers, so findings survive edits to long-lived artifacts.

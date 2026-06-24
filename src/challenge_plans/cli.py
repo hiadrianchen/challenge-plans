@@ -30,9 +30,19 @@ _ENFORCE_EXIT = {
     "approve": 0, "approve_with_unverified_timeouts": 0, "discuss": 0,
     "request_changes": 1, "inconclusive": 1, "schema_invalid": 2,
 }
+# --strict is a hard gate: only a clean approve passes. discuss (e.g. a single-family run capped
+# at discuss) and approve_with_unverified_timeouts now fail, so a gate can't look passed while
+# nothing was actually cross-verified.
+_STRICT_EXIT = {
+    "approve": 0,
+    "approve_with_unverified_timeouts": 1, "discuss": 1,
+    "request_changes": 1, "inconclusive": 1, "schema_invalid": 2,
+}
 
 
-def _exit_code(verdict: str, enforce: bool) -> int:
+def _exit_code(verdict: str, enforce: bool, strict: bool = False) -> int:
+    if strict:
+        return _STRICT_EXIT.get(verdict, 1)
     if not enforce:
         return 0  # advisory: the verdict is informational, it does not break CI
     return _ENFORCE_EXIT.get(verdict, 1)
@@ -95,7 +105,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(_render_markdown(manifest))
     else:
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
-    return _exit_code(manifest["verdict"], args.enforce)
+    return _exit_code(manifest["verdict"], args.enforce, getattr(args, "strict", False))
 
 
 def _render_deliberation(m: dict) -> str:
@@ -209,7 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--sink", choices=["stdout", "markdown"],
                      default="stdout", help="output format (github-pr-comment pending)")
     run.add_argument("--enforce", action="store_true",
-                     help="map non-approve verdicts to a non-zero exit (CI gate); advisory exits 0 by default")
+                     help="CI gate: request_changes/inconclusive/schema_invalid exit non-zero; "
+                          "discuss/approve exit 0. Advisory (exit 0) without it")
+    run.add_argument("--strict", action="store_true",
+                     help="hard gate: only a clean `approve` passes; discuss / "
+                          "approve_with_unverified_timeouts also exit non-zero")
     run.add_argument("--lang", default="en", metavar="LANG",
                      help="language for human-readable output (e.g. en, zh, ja); "
                           "JSON keys / enums / line anchors stay stable. Default en")
