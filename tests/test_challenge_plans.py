@@ -400,3 +400,14 @@ def test_synthetic_preflight_localizes_but_keeps_field_key(monkeypatch):
     monkeypatch.setenv("CHALLENGE_PLANS_LANG", "en")
     en = {c.violated_contract_field: c for c in preflight_concerns({}, "no headings here")}
     assert "Missing measurable" in en["acceptance_criteria"].title       # English fallback intact
+
+
+# ── doctor remediation (don't just report state — tell humans/agents how to fix it) ──
+def test_doctor_remediation_hints_are_actionable():
+    from challenge_plans.cli import _remediation
+    from challenge_plans.adapters import ClaudeAdapter, CodexAdapter, ProbeState
+    # not-logged-in must point at the login action; not-installed at an install path.
+    assert "/login" in _remediation(ClaudeAdapter(), ProbeState.NOT_LOGGED_IN)
+    assert "install" in _remediation(CodexAdapter(), ProbeState.NOT_INSTALLED).lower()
+    # ready needs no remediation.
+    assert _remediation(ClaudeAdapter(), ProbeState.READY) == ""

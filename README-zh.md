@@ -143,6 +143,8 @@ challenge-plans 不是单一功能，而是同一引擎上的两种模式。**�
 
 challenge-plans 驱动你已登录的任一订阅编码 CLI —— 如 **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`）。**不绑定任何特定一家。** 有**两个不同厂商**时可跨家族互验；只有一个时结论保持 advisory。无 API key、本工具不产生 per-token API 费用（`doctor` 只验登录、不查账单；用量仍计入你正常订阅额度）。
 
+**至少要有一个**已登录的订阅 CLI 才能跑——一个都没有就跑不了（这是「免 API key」的代价）。跑 **`challenge-plans doctor`**：它会列出每个后端的状态和**具体修复方式**（去装、或登录），让你或你的 agent 永远知道下一步该干嘛。
+
 ## 和你的计划工作流衔接
 
 challenge-plans 是「**执行前先评审**」这一步——它能和你可能已经在用的计划类 skill 拼起来用。

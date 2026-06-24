@@ -74,6 +74,9 @@ class ClaudeAdapter:
 
     backend = "claude-cli"
     model_family = "claude"
+    product = "Claude Code (Claude subscription)"
+    install_hint = "install Claude Code: https://docs.claude.com/en/docs/claude-code"
+    login_hint = "run `claude`, then `/login` (needs a Claude Pro/Max subscription)"
 
     def available(self) -> bool:
         # Cheap discovery during run: include it optimistically if installed; login failures
@@ -117,6 +120,9 @@ class CodexAdapter:
 
     backend = "codex-cli"
     model_family = "gpt"
+    product = "OpenAI Codex CLI (ChatGPT subscription)"
+    install_hint = "install Codex CLI: https://github.com/openai/codex"
+    login_hint = "run `codex` and sign in with your ChatGPT account"
 
     def available(self) -> bool:
         if not shutil.which("codex"):

@@ -143,6 +143,8 @@ These traps are ones a naive multi-agent setup almost always falls into — and 
 
 challenge-plans drives whatever subscription coding CLI you already have logged in — e.g. **Claude Code** (`claude`) or **OpenAI Codex** (`codex`). You don't need any specific one. With **two different vendors** it can cross-verify findings; with one, results stay advisory. No API keys, and no per-token API charges from this tool (`doctor` checks the CLIs are logged in, not your billing; usage still counts against your normal subscription limits).
 
+It needs **at least one** logged-in subscription CLI to run — with none, it can't (that's the no-API-keys trade-off). Run **`challenge-plans doctor`**: it names each backend's state and the exact fix (install it, or log in), so you — or your agent — always know the next step.
+
 ## Works with your planning workflow
 
 challenge-plans is the **"review before you execute"** step — it composes with the planning skills you may already use.

@@ -30,6 +30,15 @@ challenge-plans run <artifact> --type spec --profile standard --sink markdown --
 - `--lang <code>` (default `en`): write the review prose in the user's language, e.g. `--lang zh`. **Set this from the user's language** so the whole review comes back localized; JSON keys / enums / `L12-15` anchors stay stable. Equivalent to exporting `CHALLENGE_PLANS_LANG`.
 - Output: a 6-state verdict + surviving objections. `[sev✓]` = cross-family Verifier-confirmed, may hard-gate; `[sev?]` = unverified, advisory only.
 
+## If no backend is ready
+
+challenge-plans needs **at least one logged-in subscription CLI** (it has no model of its own and uses no API keys). If `doctor` shows nothing `ready`, don't retry blindly — **ask the user, then route**:
+1. **Has a Claude or ChatGPT subscription, but the CLI is missing / logged out** → walk them through the exact step `doctor` prints (install it, or `claude` → `/login`, or sign in to `codex`).
+2. **No subscription yet but wants one** → point them to subscribe (Claude Pro/Max or ChatGPT), then install + log in the CLI.
+3. **No subscription and doesn't want one** → explain challenge-plans cannot run without one, and stop — don't loop.
+
+`doctor` already prints the per-backend fix plus this guidance; surface it to the user rather than failing silently.
+
 ## Presenting to the user
 
 Surface the verdict + **surviving objections (✓ verified vs ? unverified)** + missing required fields as "my cross-review recommendation", then let the user decide — rather than handing them a bare decision. See [README.md](README.md) for the full picture.

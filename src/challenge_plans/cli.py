@@ -154,13 +154,38 @@ def _cmd_weigh(args: argparse.Namespace) -> int:
     return 0 if (decided or not args.enforce) else 1
 
 
+def _remediation(adapter, state: ProbeState) -> str:
+    """Actionable next step for a non-ready backend, so humans and agents know how to fix it."""
+    if state == ProbeState.NOT_INSTALLED:
+        return getattr(adapter, "install_hint", "")
+    if state == ProbeState.NOT_LOGGED_IN:
+        return getattr(adapter, "login_hint", "")
+    if state == ProbeState.BILLING_UNKNOWN:
+        return "logged in but returned no usable output — check the subscription is active / not rate-limited"
+    if state == ProbeState.INTERACTIVE_ONLY:
+        return "only runs interactively here; not usable for non-interactive review"
+    if state == ProbeState.UNSUPPORTED_VERSION:
+        return "update this CLI to a supported version"
+    return ""
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
     any_ready = False
     for cls in _ALL_ADAPTERS:
         a = cls()
         state = a.probe()
         any_ready = any_ready or state == ProbeState.READY
-        print(f"{a.backend} ({a.model_family}): {state.value}")
+        line = f"{a.backend} ({a.model_family}): {state.value}"
+        if state != ProbeState.READY:
+            hint = _remediation(a, state)
+            if hint:
+                line += f"  → {hint}"
+        print(line)
+    if not any_ready:
+        print("\nNo usable backend. challenge-plans drives a logged-in subscription CLI "
+              "(no API keys) — it cannot run without at least one.")
+        print("  • Have a Claude or ChatGPT subscription? Install / log into the matching CLI above.")
+        print("  • Don't have one yet? You'll need a subscription to one of them to run this tool.")
     return 0 if any_ready else 1
 
 
