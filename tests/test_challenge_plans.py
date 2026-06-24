@@ -297,11 +297,49 @@ def test_empty_diff_schema_invalid(tmp_path):
     assert m["verdict"] == "schema_invalid"
 
 
-def test_plan_decision_still_unsupported(tmp_path):
-    # plan/decision enums are still missing, so they are rejected before run.
-    for t in ("plan", "decision"):
-        with pytest.raises(NotImplementedError):
-            run_challenge(dmk(tmp_path), t, "fast", [MockAdapter({}, "mock")])
+def pmk(tmp_path, text="Day 1: land, then sightsee.\nDay 2: pack six stops across town.\nBook the non-refundable flight now.\n"):
+    p = tmp_path / "plan.md"
+    p.write_text(text, encoding="utf-8")
+    return str(p)
+
+
+def test_plan_type_runs_with_generic_failure_types(tmp_path):
+    # `run <plan> --type plan` works (no NotImplementedError) and accepts domain-neutral plan failure types.
+    sc = {"mock:feasibility": cbody([concern(span="L2-2", ft="ignored_constraint")])}
+    m = run_challenge(pmk(tmp_path), "plan", "fast", [MockAdapter(sc, "mock")])
+    assert m["artifact_type"] == "plan" and m["verdict"] in {v.value for v in Verdict}
+    real = [c for c in m["concerns"] if c["raised_by"] != ["preflight"]]
+    assert len(real) == 1 and real[0]["failure_type"] == "ignored_constraint"
+
+
+def test_plan_no_frontmatter_preflight_injection(tmp_path):
+    # A generic plan is free prose; never inject acceptance_criteria/non_goals synthetic concerns.
+    m = run_challenge(pmk(tmp_path), "plan", "fast",
+                      [MockAdapter({"mock:feasibility": cbody([])}, "mock")])
+    assert m["preflight"]["missing_required_to_approve"] == []
+    assert all(c["raised_by"] != ["preflight"] for c in m["concerns"])
+
+
+def test_plan_rejects_code_failure_type_out_of_enum(tmp_path):
+    # A spec/code-only failure_type in a plan run is dropped out-of-enum, never silently swallowed.
+    sc = {"mock:feasibility": cbody([concern(span="L2-2", ft="integration_contract_gap")])}
+    m = run_challenge(pmk(tmp_path), "plan", "fast", [MockAdapter(sc, "mock")])
+    assert any(d["reason"] == "failure_type_out_of_enum" for d in m["dropped_concerns"])
+    assert [c for c in m["concerns"] if c["raised_by"] != ["preflight"]] == []
+
+
+def test_plan_clean_multi_family_approves(tmp_path):
+    sc = {"claude:feasibility": cbody([]), "gpt:risk": cbody([]),
+          "claude:goal-alignment": cbody([])}
+    m = run_challenge(pmk(tmp_path), "plan", "standard",
+                      [MockAdapter(sc, "claude"), MockAdapter(sc, "gpt")])
+    assert m["verdict"] == "approve" and m["source_diversity"]["families"] == 2
+
+
+def test_decision_still_unsupported(tmp_path):
+    # plan is now supported; decision's enum is still undefined -> rejected before run.
+    with pytest.raises(NotImplementedError):
+        run_challenge(pmk(tmp_path), "decision", "fast", [MockAdapter({}, "mock")])
 
 
 # ── weigh-options deliberation mode ───────────────────────────────────────────

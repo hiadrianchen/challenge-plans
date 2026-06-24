@@ -4,14 +4,14 @@ frame the prompt + whether frontmatter preflight applies.
 What's shared across types is the manifest/rounds/adapters/verdict pipeline; what differs is the
 **rubric and the failure_type enum**. A type whose enum isn't defined isn't allowed into `run`
 (otherwise the canonical concern key can't be computed). This module is the registry of the
-"defined" types: spec / diff are implemented; plan / decision are pending (get_rubric raises
+"defined" types: spec / diff / plan are implemented; decision is pending (get_rubric raises
 NotImplementedError, which the CLI turns into a friendly exit).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .schema import DiffFailureType, SpecFailureType
+from .schema import DiffFailureType, PlanFailureType, SpecFailureType
 
 
 # Spec review lenses: multiple personas on one subscription widen coverage.
@@ -34,6 +34,18 @@ DIFF_PERSONAS: dict[str, str] = {
                      "coverage, and whether performance / backward-compatibility is quietly broken.",
 }
 
+# Generic plan review lenses (domain-neutral — works for a trip, a launch, a hire, a move).
+PLAN_PERSONAS: dict[str, str] = {
+    "feasibility": "You care only about: can this plan actually be carried out under real "
+                   "constraints (time, budget, people, energy) — which step is most likely to stall "
+                   "or be impossible.",
+    "risk": "You care only about: where this plan is most likely to go wrong, what is most costly "
+            "or irreversible, and which known risks have no mitigation or fallback.",
+    "goal-alignment": "You care only about: whether the stated goal is well-defined, whether the "
+                      "steps actually achieve it, which assumptions must hold, and whether a simpler "
+                      "path exists.",
+}
+
 
 @dataclass(frozen=True)
 class Rubric:
@@ -49,6 +61,7 @@ class Rubric:
 # exclude it from the challenger enum.
 _SPEC_FAILURE_TYPES = tuple(t.value for t in SpecFailureType if t.value != "contract_violation")
 _DIFF_FAILURE_TYPES = tuple(t.value for t in DiffFailureType)
+_PLAN_FAILURE_TYPES = tuple(t.value for t in PlanFailureType)
 
 
 SPEC_RUBRIC = Rubric(
@@ -78,7 +91,23 @@ DIFF_RUBRIC = Rubric(
     frontmatter_preflight=False,
 )
 
-_RUBRICS: dict[str, Rubric] = {r.artifact_type: r for r in (SPEC_RUBRIC, DIFF_RUBRIC)}
+PLAN_RUBRIC = Rubric(
+    artifact_type="plan",
+    artifact_noun="plan",
+    failure_types=_PLAN_FAILURE_TYPES,
+    personas=PLAN_PERSONAS,
+    profile_personas={
+        "fast": ["feasibility"],
+        "standard": ["feasibility", "risk", "goal-alignment"],
+        "deep": ["feasibility", "risk", "goal-alignment"],
+    },
+    # A generic plan is free prose (no required frontmatter fields). A missing success criterion
+    # surfaces as a model finding (missing_success_criteria), not a mechanical preflight gate —
+    # keeping plan review light enough for any domain.
+    frontmatter_preflight=False,
+)
+
+_RUBRICS: dict[str, Rubric] = {r.artifact_type: r for r in (SPEC_RUBRIC, DIFF_RUBRIC, PLAN_RUBRIC)}
 
 
 def get_rubric(artifact_type: str) -> Rubric:

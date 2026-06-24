@@ -74,6 +74,20 @@ class DiffFailureType(str, Enum):
     BACKWARD_COMPAT_BREAK = "backward_compat_break"      # Backward-compatible schema/serialization/config contract broken.
 
 
+# failure_type enum for a generic plan (any domain — not code-specific): the ways any plan
+# can fail when you go to act on it. Used by --type plan so the tool reviews trips, launches,
+# hires, moves — anything you'd plan — not just dev specs.
+class PlanFailureType(str, Enum):
+    MISSING_SUCCESS_CRITERIA = "missing_success_criteria"          # No measurable definition of "done"/"good".
+    IGNORED_CONSTRAINT = "ignored_constraint"                      # Time/budget/people/energy limits not accounted for.
+    UNADDRESSED_RISK = "unaddressed_risk"                          # A known failure mode has no mitigation.
+    DEPENDENCY_OR_SEQUENCING_GAP = "dependency_or_sequencing_gap"  # Steps depend on / must precede each other but don't line up.
+    UNSTATED_ASSUMPTION = "unstated_assumption"                    # Relies on an assumption that may not hold.
+    GOAL_MISALIGNMENT = "goal_misalignment"                       # Means don't serve the stated goal / scope drifts.
+    IRREVERSIBILITY_OR_HIGH_COST = "irreversibility_or_high_cost"  # Irreversible / costly step with no checkpoint.
+    NO_FALLBACK = "no_fallback"                                    # No plan B / recovery path if a step fails.
+
+
 # ── Concern identity: canonical keys prohibit free-text identity ──
 def canonical_key(
     *, artifact_span: str, failure_type: str,
