@@ -1,6 +1,15 @@
 # Design draft: robust source anchors
 
-Status: **design ready — awaiting owner decision (not implemented).**
+Status: **DEFERRED (owner decision, 2026-06-25).** Not implemented; kept as backlog.
+
+Decision: defer until a consumer exists — i.e. until challenge-plans actually re-reviews an
+*evolving* artifact across versions and needs to correlate "same finding as last time". Today
+nothing reads stable anchors, and the self-review caught that the obvious implementation is
+actively wrong (a content hash changes on every edit, so it neither survives edits nor belongs in
+`canonical_key` — putting it there would give an edited-but-same finding a brand-new identity).
+Building it now would change core dedup/identity semantics with no consumer = risk without value.
+**Buried-risk note:** revisit this the moment a re-review/diff-across-versions feature is proposed;
+do not bolt anchors onto `canonical_key` when that day comes.
 
 ## Goal
 Make a finding's anchor survive edits to the artifact. Today a concern binds to a bare line range (`L12-15`), validated by `_valid_span`, and `canonical_key` derives identity from `artifact_span + failure_type`. Line numbers drift the moment the document changes, so a finding can't be correlated across versions of an evolving artifact.

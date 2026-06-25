@@ -1,6 +1,24 @@
 # Design draft: mechanical verification for `--type diff`
 
-Status: **design ready — awaiting owner decision (not implemented).**
+Status: **IMPLEMENTED (v1, 2026-06-25, commit 2bfb97d).** Owner approved "go with the recommendation."
+
+## What shipped (v1)
+- `--verify "CMD"` (repeatable) runs the user's own command in cwd → top-level `project_checks`
+  entry `{cmd, status, exit_code, output_tail}` with `status ∈ {passed, failed, errored, timed_out}`.
+- A `failed` check hard-gates the verdict to `request_changes`; `errored`/`timed_out` are advisory.
+- Explicit-only (decision #1 = yes), failed hard-gates (decision #2 = yes), generic CMD not presets
+  (decision #4 = yes). Runs in its own process group so a timeout kills the whole tree.
+- **Deliberately deferred this round (recorded as buried backlog):**
+  - Decision #3 (rename `verified` → `cross_model_confirmed` + add `mechanically_verified` to the
+    per-finding schema) was **NOT done** — it is a breaking manifest change with no consumer yet,
+    and v1 models the mechanical result as a *project-level* fact, not a per-finding one. The
+    honesty concern it addressed is already handled by the CLI wording. Revisit when/if per-finding
+    mechanical verification (generate+run a targeted repro per finding) is built.
+  - True per-finding mechanical verification (the "much larger future item" in the scope
+    correction) remains future work.
+
+---
+## Original draft (for the record)
 
 ## Goal
 Let a code finding hard-gate on a *mechanically-run* check (tests / typecheck / lint / static analysis), not only on a second LLM agreeing. Today the `✓` on a `--type diff` finding is **cross-model confirmation** (another model family reproduced it with a line anchor) — it never runs your code. For a real CI gate on code, that is too weak.
