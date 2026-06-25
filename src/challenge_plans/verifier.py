@@ -12,7 +12,7 @@ from __future__ import annotations
 import concurrent.futures
 import re
 
-from .adapters import VoterSpec, strip_marker
+from .adapters import MAX_PARALLEL_VOTERS, VoterSpec, strip_marker
 from .prompts import END_MARKER, UNTRUSTED_GUARD, lang_directive
 from .schema import Concern, ConcernStatus, Severity
 
@@ -85,7 +85,8 @@ def verify_concerns(concerns: list[Concern], numbered: str, adapters: list,
         return concern, rec
 
     records: list[dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(targets))) as ex:
+    with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(MAX_PARALLEL_VOTERS, max(1, len(targets)))) as ex:
         for fut in [ex.submit(_verify, c) for c in targets]:
             concern, rec = fut.result()
             a = rec["assessment"]

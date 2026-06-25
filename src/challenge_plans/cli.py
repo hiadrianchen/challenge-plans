@@ -89,6 +89,16 @@ def _render_markdown(m: dict) -> str:
              + (f" · dropped {len(m['dropped_concerns'])}" if m.get("dropped_concerns") else "")
              + (f" · rebutted {len([c for c in m['concerns'] if c['status']=='rebutted'])}"
                 if any(c['status'] == 'rebutted' for c in m['concerns']) else ""), ""]
+    pcs = m.get("project_checks", [])
+    if pcs:
+        failed = [c for c in pcs if c["status"] == "failed"]
+        advisory = [c for c in pcs if c["status"] in ("errored", "timed_out")]
+        lines.insert(len(lines) - 1,
+                     f"- project checks: {len(pcs)} mechanical (your own commands, not an LLM)"
+                     + (f" · ❌ {len(failed)} failed → hard-gates" if failed else " · all passed ✓")
+                     + (f" · ⚠️{len(advisory)} errored/timed-out (advisory)" if advisory else ""))
+        for c in failed:
+            lines.insert(len(lines) - 1, f"  - failed: `{c['cmd']}` (exit {c['exit_code']})")
     for c in m["concerns"]:
         if c["status"] == "rebutted":
             continue
@@ -112,7 +122,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
     try:
-        manifest = run_challenge(args.artifact, args.type, args.profile, _discover_adapters())
+        manifest = run_challenge(
+            args.artifact, args.type, args.profile, _discover_adapters(),
+            verify_cmds=getattr(args, "verify", None),
+            record_backends=bool(getattr(args, "save", None)))
     except NotImplementedError as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -257,6 +270,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--strict", action="store_true",
                      help="hard gate: only a clean `approve` passes; discuss / "
                           "approve_with_unverified_timeouts also exit non-zero")
+    run.add_argument("--verify", action="append", metavar="CMD",
+                     help="run a mechanical check — your own command, e.g. \"pytest -q\" — in the "
+                          "current directory; a failed check sets the verdict to request_changes. "
+                          "Repeatable. The command runs as-is and is NEVER derived from the "
+                          "artifact; combine with --enforce/--strict to break CI")
     run.add_argument("--save", metavar="DIR",
                      help="persist a run record (tool version + timestamp + full manifest) to DIR "
                           "for audit / replay")

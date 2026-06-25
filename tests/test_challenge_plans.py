@@ -633,6 +633,122 @@ def test_schema_repair_retry_still_unparseable_drops_voter(tmp_path):
     assert m["voters"][0]["status"] == "parse_error"
 
 
+# ── #13 mechanical project checks (--verify): a real failure hard-gates, advisory stays advisory ──
+def _clean_multi_family(tmp_path, **kw):
+    sc = {"claude:execution-failure": cbody([]), "gpt:correctness": cbody([]),
+          "claude:scope-boundary": cbody([])}
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    return run_challenge(mk(tmp_path, text), "spec", "standard",
+                         [MockAdapter(sc, "claude"), MockAdapter(sc, "gpt")], **kw)
+
+
+def test_verify_passing_check_does_not_gate(tmp_path):
+    m = _clean_multi_family(tmp_path, verify_cmds=["exit 0"])
+    assert m["verdict"] == "approve"
+    assert m["project_checks"][0]["status"] == "passed" and m["project_checks"][0]["exit_code"] == 0
+
+
+def test_verify_failing_check_hard_gates_request_changes(tmp_path):
+    # A clean panel that would approve is forced to request_changes by a failing mechanical check.
+    m = _clean_multi_family(tmp_path, verify_cmds=["exit 1"])
+    assert m["verdict"] == "request_changes"
+    assert m["project_checks"][0]["status"] == "failed" and m["project_checks"][0]["exit_code"] == 1
+
+
+def test_verify_failure_breaks_ci_only_under_enforce(tmp_path, monkeypatch):
+    # Isolate --verify's gating effect: a complete single-family spec is `discuss` (passes --enforce).
+    # A failing check turns it into request_changes, which --enforce then breaks CI on.
+    from challenge_plans import cli
+    monkeypatch.setattr(cli, "_discover_adapters",
+                        lambda: [MockAdapter({"mock:execution-failure": cbody([])}, "mock")])
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    p = mk(tmp_path, text)
+    # fast = single persona so the one mock voter completes the panel (single family -> discuss).
+    assert cli.main(["run", p, "--type", "spec", "--profile", "fast", "--enforce"]) == 0          # discuss passes enforce
+    assert cli.main(["run", p, "--type", "spec", "--profile", "fast", "--verify", "exit 1"]) == 0  # advisory: verdict only
+    assert cli.main(["run", p, "--type", "spec", "--profile", "fast", "--verify", "exit 1", "--enforce"]) == 1  # CI breaks
+
+
+def test_verify_errored_is_advisory_not_gate(tmp_path):
+    # A timed-out / errored check can't tell a broken env from a real failure -> advisory, no gate.
+    m = _clean_multi_family(tmp_path, verify_cmds=["exit 0"], verify_timeout=120)
+    # passing stays approve (sanity); now a timeout:
+    m2 = _clean_multi_family(tmp_path, verify_cmds=["sleep 5"], verify_timeout=1)
+    assert m["verdict"] == "approve"
+    assert m2["project_checks"][0]["status"] == "timed_out"
+    assert m2["verdict"] == "approve"                       # advisory: does not hard-gate
+
+
+def test_verify_arg_wires_through_parser():
+    from challenge_plans.cli import build_parser
+    a = build_parser().parse_args(["run", "x.md", "--verify", "pytest -q", "--verify", "ruff check"])
+    assert a.verify == ["pytest -q", "ruff check"]
+    assert build_parser().parse_args(["run", "x.md"]).verify is None
+
+
+def test_verify_command_never_built_from_artifact(tmp_path):
+    # Safety invariant: artifact content is untrusted and must never become a shell command.
+    # A run with no --verify performs zero project checks regardless of artifact body.
+    m = run_challenge(mk(tmp_path, "# spec\nrm -rf / # malicious-looking body\nL3\n"), "spec", "fast",
+                      [MockAdapter({"mock:execution-failure": cbody([])}, "mock")])
+    assert m["project_checks"] == []
+
+
+# ── #-small: convergence keeps going on a severity upgrade (not just brand-new keys) ──
+def test_deep_does_not_converge_while_severity_still_escalating(tmp_path):
+    from challenge_plans.adapters import CaptureResult
+    # Round 1 raises a medium concern; round 2 re-raises the SAME key at critical (an upgrade, no
+    # new key). The run must not converge at round 2 — a severity upgrade is still movement.
+    class _Escalating:
+        backend = "esc"
+        model_family = "esc"
+
+        def __init__(self):
+            self.round = 0
+
+        def invoke(self, prompt, spec):
+            # Round 2+ prompts include the prior-findings block; use that to switch severity.
+            sev = "critical" if "already" in prompt.lower() or "previous round" in prompt.lower() else "medium"
+            return CaptureResult(True, cbody([concern(ft="hidden_dependency", sev=sev)]))
+
+    m = run_challenge(mk(tmp_path), "spec", "deep", [_Escalating()])
+    # escalation at round 2 keeps it going; round 3 repeats critical (no new key, no upgrade) -> stop.
+    assert m["rounds"] == 3
+    real = [c for c in m["concerns"] if c["raised_by"] != ["preflight"]]
+    assert real[0]["severity"] == "critical"
+
+
+def test_project_checks_render_in_markdown(tmp_path):
+    # The mechanical-check summary + each failed command must show up in human-readable output.
+    from challenge_plans.cli import _render_markdown
+    m = _clean_multi_family(tmp_path, verify_cmds=["exit 0", "exit 3"])
+    out = _render_markdown(m)
+    assert "project checks: 2 mechanical" in out
+    assert "1 failed" in out and "hard-gates" in out
+    assert "exit 3" in out                                  # the failing command is named
+
+
+def test_adapter_version_none_when_binary_missing(monkeypatch):
+    # version() must degrade to None (not crash) when the CLI isn't installed — the path the
+    # dogfood flagged as untested.
+    from challenge_plans import adapters
+    from challenge_plans.adapters import ClaudeAdapter, CodexAdapter
+    monkeypatch.setattr(adapters.shutil, "which", lambda _: None)
+    assert ClaudeAdapter().version() is None
+    assert CodexAdapter().version() is None
+
+
+# ── #-small: backend versions recorded in provenance only when saving ──
+def test_backends_recorded_only_when_requested(tmp_path):
+    sc = {"mock:execution-failure": cbody([])}
+    plain = run_challenge(mk(tmp_path), "spec", "fast", [MockAdapter(sc, "mock")])
+    saved = run_challenge(mk(tmp_path), "spec", "fast", [MockAdapter(sc, "mock")],
+                          record_backends=True)
+    assert plain["backends"] == []                          # no extra subprocess work on normal runs
+    assert saved["backends"][0]["version"] == "mock"        # version captured for audit/replay
+    assert saved["backends"][0]["model_family"] == "mock"
+
+
 # ── golden guard: user-visible wording must not drift back to over-claiming ──
 def test_cli_render_wording_stays_honest(tmp_path):
     from challenge_plans.cli import _render_markdown

@@ -15,7 +15,7 @@ import hashlib
 import json
 import re
 
-from .adapters import VoterSpec, strip_marker
+from .adapters import MAX_PARALLEL_VOTERS, VoterSpec, strip_marker
 from .rubric import SPEC_RUBRIC, get_rubric
 from .schema import (
     Concern, PanelIntegrity, Severity, Verdict,
@@ -40,6 +40,53 @@ _REPAIR_HINT = ("\n\nIMPORTANT: your previous reply could not be parsed. Reply w
                 "JSON object specified above and the final marker line — no other text.")
 _SPAN_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
 _DECODER = json.JSONDecoder()
+
+
+_VERIFY_OUTPUT_CAP = 4000  # bytes of combined stdout/stderr tail kept per project check
+
+
+def _run_project_checks(cmds: list[str], timeout: int) -> list[dict]:
+    """Run user-configured `--verify` commands in cwd and record their results.
+
+    These are MECHANICAL checks (the user's own tests/typecheck/lint), distinct from the LLM
+    panel: a `failed` check hard-gates the verdict; `errored`/`timed_out` are advisory (you
+    can't tell a broken environment from a real failure). Security: commands come ONLY from the
+    explicit --verify flag and are NEVER derived from the untrusted artifact content.
+
+    The command runs in its own process group (`start_new_session`), so a timeout kills the whole
+    tree — otherwise `shell=True`'s children (pytest, etc.) would orphan and keep running.
+    """
+    import os
+    import signal
+    import subprocess
+    checks: list[dict] = []
+    for cmd in cmds:
+        proc = None
+        try:
+            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, start_new_session=True)
+            out, _ = proc.communicate(timeout=timeout)
+            rc = proc.returncode
+        except subprocess.TimeoutExpired:
+            try:  # kill the whole group so shell children don't orphan; fall back to the leader
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (OSError, AttributeError):
+                if proc is not None:
+                    proc.kill()
+            try:
+                proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, ValueError, OSError):
+                pass
+            checks.append({"cmd": cmd, "status": "timed_out", "exit_code": None, "output_tail": ""})
+            continue
+        except OSError as e:  # command could not even start (e.g. bad shell)
+            checks.append({"cmd": cmd, "status": "errored", "exit_code": None,
+                           "output_tail": str(e)[:_VERIFY_OUTPUT_CAP]})
+            continue
+        out = (out or "")[-_VERIFY_OUTPUT_CAP:]
+        checks.append({"cmd": cmd, "status": "passed" if rc == 0 else "failed",
+                       "exit_code": rc, "output_tail": out})
+    return checks
 
 
 def _number_lines(text: str) -> str:
@@ -114,7 +161,9 @@ def _build_panel(profile: str, adapters: list, personas: list[str] | None = None
     return panel
 
 
-def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters) -> dict:
+def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters,
+                  *, verify_cmds: list[str] | None = None, verify_timeout: int = 120,
+                  record_backends: bool = False) -> dict:
     from .prompts import build_challenger_prompt
     # Reject types without a defined failure_type enum here; plan/decision still raise NotImplementedError.
     rubric = get_rubric(artifact_type)
@@ -129,7 +178,7 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
 
     base = {"mode": "challenge", "artifact_type": artifact_type,
             "artifact_hash": artifact_hash, "rounds": 0, "profile": profile,
-            "verifier": "present (cross-family, v0)"}
+            "verifier": "present (cross-family, v0)", "backends": [], "project_checks": []}
 
     def _schema_invalid(reason):
         return {**base, "verdict": Verdict.SCHEMA_INVALID.value, "schema_invalid_reason": reason,
@@ -192,12 +241,13 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
             return voter_id, spec, cap, raw, repaired
 
         results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(voters)) as ex:
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(MAX_PARALLEL_VOTERS, len(voters))) as ex:
             futs = [ex.submit(_run, a, p, v, prior) for a, p, v in voters]
             for fut in futs:
                 results.append(fut.result())
 
-        new_keys = 0
+        new_keys, escalated = 0, False
         for voter_id, spec, cap, raw, repaired in results:
             meta = {"voter_id": voter_id, "backend": spec.backend, "round": rnd,
                     "model_family": spec.model_family, "transport": spec.transport}
@@ -226,10 +276,13 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                 elif severity_rank(c.severity) > severity_rank(existing.severity):
                     # Dedup + strictest-wins: keep the highest severity per key.
                     concerns_by_key[c.key] = c
+                    escalated = True  # a severity upgrade is still movement; don't converge on it
                 raised_by.setdefault(c.key, []).append(voter_id)
 
-        # Convergence: a later round that surfaces no NEW concern means there's nothing left to find.
-        if rnd > 1 and new_keys == 0:
+        # Convergence: a later round that surfaces no new concern AND no severity upgrade means
+        # there is nothing left to find — stop. A round that only raises an existing concern's
+        # severity is still progress, so keep going (lets a later round confirm/extend it).
+        if rnd > 1 and new_keys == 0 and not escalated:
             converged = True
             break
 
@@ -255,10 +308,24 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
     if low_diversity:
         verdict = stricter_verdict(verdict, Verdict.DISCUSS)
 
+    # Mechanical project checks (--verify): a real test/lint failure is the strongest evidence we
+    # can get, so a `failed` check hard-gates to request_changes. errored/timed_out stay advisory.
+    project_checks = _run_project_checks(verify_cmds or [], verify_timeout)
+    if any(pc["status"] == "failed" for pc in project_checks):
+        verdict = stricter_verdict(verdict, Verdict.REQUEST_CHANGES)
+
+    # Backend CLI versions are only collected when persisting provenance (--save), to keep normal
+    # runs free of extra subprocess calls while making saved audit records replay-complete.
+    backends = ([{"backend": a.backend, "model_family": a.model_family,
+                  "version": a.version() if hasattr(a, "version") else None}
+                 for a in adapters] if record_backends else [])
+
     return {
         **base,
         "verdict": verdict.value,
         "rounds": rounds_run,
+        "backends": backends,
+        "project_checks": project_checks,
         "convergence": {
             "converged": converged,
             "reason": ("single_round" if max_rounds == 1

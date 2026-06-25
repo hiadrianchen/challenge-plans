@@ -16,6 +16,10 @@ from enum import Enum
 from .prompts import END_MARKER
 from .schema import CaptureFailureReason
 
+# Defensive ceiling on concurrent subprocesses. The panel is normally tiny (a few personas),
+# but cap it so an oversized persona list can't fan out into a thread/subprocess storm.
+MAX_PARALLEL_VOTERS = 8
+
 
 class ProbeState(str, Enum):
     READY = "ready"
@@ -105,6 +109,17 @@ class ClaudeAdapter:
             return ProbeState.NOT_LOGGED_IN
         return ProbeState.READY if r.stdout.strip() else ProbeState.BILLING_UNKNOWN
 
+    def version(self) -> str | None:
+        """Best-effort CLI version string for provenance/replay; None if unavailable."""
+        if not shutil.which("claude"):
+            return None
+        try:
+            r = subprocess.run(["claude", "--version"], capture_output=True, text=True,
+                               timeout=20, env=claude_cli_env())
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        return r.stdout.strip() or None
+
     def invoke(self, prompt: str, spec: VoterSpec, wall_timeout: int = 150) -> CaptureResult:
         """v0: total subprocess wall-clock timeout, not an idle timeout.
 
@@ -145,6 +160,16 @@ class CodexAdapter:
         if not shutil.which("codex"):
             return ProbeState.NOT_INSTALLED
         return ProbeState.READY if self.available() else ProbeState.NOT_LOGGED_IN
+
+    def version(self) -> str | None:
+        """Best-effort CLI version string for provenance/replay; None if unavailable."""
+        if not shutil.which("codex"):
+            return None
+        try:
+            r = subprocess.run(["codex", "--version"], capture_output=True, text=True, timeout=20)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        return r.stdout.strip() or None
 
     def invoke(self, prompt: str, spec: VoterSpec, wall_timeout: int = 300) -> CaptureResult:
         # -o writes the machine-readable final message to a file for correct integrity capture,
@@ -194,6 +219,9 @@ class MockAdapter:
 
     def probe(self) -> ProbeState:
         return ProbeState.READY
+
+    def version(self) -> str | None:
+        return "mock"
 
     def invoke(self, prompt: str, spec: VoterSpec, wall_timeout: int = 150) -> CaptureResult:
         return check_capture(self._scripted.get(spec.voter_id, ""), 0)
