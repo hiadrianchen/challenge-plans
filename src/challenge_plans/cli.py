@@ -82,8 +82,9 @@ def _render_markdown(m: dict) -> str:
              + (f" · ⚠️missing {pi['missing']}" if pi["missing"] else " · complete ✓"),
              f"- diversity: {div['families']} families"
              + (f" · ⚠️{div['warning']}" if div.get("warning") else ""),
-             f"- verified: {len(m.get('verifications', []))} high/critical reviewed by Verifier"
-             + " (✓ = verified, may hard-gate; ? = unverified, advisory)",
+             f"- cross-family confirmed: {len(m.get('verifications', []))} high/critical reviewed"
+             + " (✓ = another model family reproduced it with a line anchor — not a mechanical test;"
+             + " may hard-gate · ? = unconfirmed, advisory)",
              f"- surviving objections: {len([c for c in m['concerns'] if c['status'] != 'rebutted'])}"
              + (f" · dropped {len(m['dropped_concerns'])}" if m.get("dropped_concerns") else "")
              + (f" · rebutted {len([c for c in m['concerns'] if c['status']=='rebutted'])}"

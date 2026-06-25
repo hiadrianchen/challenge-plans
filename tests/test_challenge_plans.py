@@ -631,3 +631,14 @@ def test_schema_repair_retry_still_unparseable_drops_voter(tmp_path):
     assert a.calls == 2                                      # one try + one repair retry, then give up
     assert m["panel_integrity"]["collected_voters"] == 0
     assert m["voters"][0]["status"] == "parse_error"
+
+
+# ── golden guard: user-visible wording must not drift back to over-claiming ──
+def test_cli_render_wording_stays_honest(tmp_path):
+    from challenge_plans.cli import _render_markdown
+    m = run_challenge(mk(tmp_path), "spec", "fast",
+                      [MockAdapter({"mock:execution-failure": cbody([])}, "mock")])
+    out = _render_markdown(m)
+    assert "= verified" not in out                          # the old over-claim is gone
+    assert "cross-family confirmed" in out
+    assert "not a mechanical test" in out
