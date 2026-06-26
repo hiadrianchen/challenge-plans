@@ -10,9 +10,13 @@ Harden a plan/spec in multi-agent adversarial review before execution, to reduce
 
 ## When to use (routing signals)
 
-- Input is a **single drafted artifact** (spec/plan/diff/design doc/adr) + intent "review / find flaws / can this execute / harden / QA" → **use this skill**.
+- Input is a **single drafted artifact** + intent "review / find flaws / can this execute / harden / QA" → **use this skill**. Pick `--type` by what the artifact *is*:
+  - a **spec / design doc / PRD** you're about to build → `--type spec`
+  - **any plan with steps** to execute (dev or not — a trip, a launch, a hire) → `--type plan`
+  - a **code change** (`git diff`) → `--type diff`
+  - a **decision already made** (an ADR / "we chose X because Y" — a tech-stack pick, a vendor, a hire) → `--type decision`. Audits the *choice itself*: skipped alternatives, weak evidence, sunk-cost reasoning, irreversibility.
 - An agent has finished something and is **about to ask the user to decide or QA** → run this first and present the cross-review recommendation.
-- Input is **≥2 options to choose from** → use the sibling `weigh-options` (deliberation/voting), not this.
+- Input is **≥2 options still open to choose among** → use the sibling `weigh-options` (deliberation/voting), not this. (`--type decision` is the opposite: one option *already* chosen, audited after the fact.)
 
 ## Run
 
@@ -25,7 +29,7 @@ challenge-plans run <artifact> --type spec --profile standard --sink markdown --
 # From a source checkout instead (not pip-installed): PYTHONPATH=src python3 -m challenge_plans.cli <args>
 ```
 
-- `--type spec|diff|plan` (`decision` rubric still pending — exits 2 by design). `diff` reviews a raw `git diff`; **`plan` reviews ANY plan (a trip, a launch, a hire — not just dev specs)** with domain-neutral failure types (missing success criteria / ignored constraint / unaddressed risk / sequencing gap / unstated assumption / goal misalignment / irreversibility / no fallback) and feasibility·risk·goal-alignment lenses. All run the same verdict pipeline.
+- `--type spec|diff|plan|decision`. `diff` reviews a raw `git diff`; **`plan` reviews ANY plan (a trip, a launch, a hire — not just dev specs)** with domain-neutral failure types (missing success criteria / ignored constraint / unaddressed risk / sequencing gap / unstated assumption / goal misalignment / irreversibility / no fallback) and feasibility·risk·goal-alignment lenses; **`decision` audits a choice already made** (ignored alternative / weak evidence / unstated assumption / sunk-cost bias / unaddressed downside / irreversibility / no review trigger / misframed problem) with alternatives·evidence·reversibility-cost lenses. All run the same verdict pipeline.
 - `--profile fast|standard|deep`, `--sink stdout|markdown`, `--enforce` (non-approve verdicts exit non-zero; default advisory exits 0).
 - `--lang <code>` (default `en`): write the review prose in the user's language, e.g. `--lang zh`. **Set this from the user's language** so the whole review comes back localized; JSON keys / enums / `L12-15` anchors stay stable. Equivalent to exporting `CHALLENGE_PLANS_LANG`.
 - Output: a 6-state verdict + surviving objections. `[sev✓]` = cross-family Verifier-confirmed, may hard-gate; `[sev?]` = unverified, advisory only.
@@ -47,4 +51,4 @@ Surface the verdict + **surviving objections (✓ verified vs ? unverified)** + 
 
 - **superpowers** (`writing-plans → executing-plans`): after `writing-plans` saves a plan file (default `docs/superpowers/plans/<date>-<feature>.md` — read the actual path), run `challenge-plans run <plan> --type spec` **before** `executing-plans`. It occupies the same pre-execution review seam as superpowers' built-in `plan-document-reviewer`, but as a multi-CLI cross-family pass. Route surviving objections back into the plan, then execute.
 - **grill-me** (mattpocock/skills): complementary and earlier — it interactively aligns the user while the plan forms (no file output). Run challenge-plans *after* a written plan/PRD exists.
-- Nothing auto-invokes challenge-plans; the calling agent wires it into the seam. `--type plan`/`decision` rubrics are pending — use `--type spec` for plan-like prose today.
+- Nothing auto-invokes challenge-plans; the calling agent wires it into the seam and chooses `--type` from the routing signals above.

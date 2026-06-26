@@ -88,6 +88,21 @@ class PlanFailureType(str, Enum):
     NO_FALLBACK = "no_fallback"                                    # No plan B / recovery path if a step fails.
 
 
+# failure_type enum for a decision already made (an ADR-style "we chose X because Y" — any domain).
+# Where plan/spec/diff review a forward-looking artifact you're about to execute, --type decision
+# audits the **quality of a choice already taken**: was the reasoning sound, were alternatives and
+# evidence handled honestly. (Distinct from `weigh`, which picks among ≥2 still-open options.)
+class DecisionFailureType(str, Enum):
+    IGNORED_ALTERNATIVE = "ignored_alternative"                    # A viable option was never considered or dismissed without fair comparison.
+    WEAK_EVIDENCE = "weak_evidence"                                # Rests on assertion/anecdote/unverifiable claims, not evidence proportional to the stakes.
+    UNSTATED_ASSUMPTION = "unstated_assumption"                    # Depends on a premise that may not hold and is not tested.
+    SUNK_COST_OR_STATUS_QUO_BIAS = "sunk_cost_or_status_quo_bias"  # Justified by past investment or inertia rather than forward expected value.
+    UNADDRESSED_DOWNSIDE = "unaddressed_downside"                  # A material downside / failure mode of the chosen option has no mitigation.
+    IRREVERSIBILITY_UNDERWEIGHTED = "irreversibility_underweighted"  # Costly/hard to reverse with no off-ramp, or wrongly treated as reversible.
+    NO_REVIEW_TRIGGER = "no_review_trigger"                        # No measurable definition of a good outcome and no condition that would revisit/reverse it.
+    MISFRAMED_PROBLEM_OR_FALSE_DICHOTOMY = "misframed_problem_or_false_dichotomy"  # Answers the wrong question or narrows the option space artificially.
+
+
 # ── Concern identity: canonical keys prohibit free-text identity ──
 def canonical_key(
     *, artifact_span: str, failure_type: str,

@@ -20,11 +20,14 @@
 
 ## 它能审什么
 
-你不写 spec 也能用。它做三件事：
+你不写 spec 也能用。它做四件事：
 
 - 📋 **任何计划** —— 旅行、上线、招聘、搬家。`--type plan` 按「计划常见错法」来挑刺（见下）。
 - 📝 **一份成型的 spec / 设计稿**（动手前）—— `--type spec`。
-- 🔧 **一次代码改动**（轻量 review）—— `--type diff`。而当你**在几个选项间拿不准**时，`weigh` 用加权、暴露异议的议事来投票选。
+- 🔧 **一次代码改动**（轻量 review）—— `--type diff`。
+- 🧭 **一个你已经做出的决定** —— 技术选型、选供应商、招人。`--type decision` 审**这个决定本身**：你跳过的替代方案、撑不起赌注的证据、沉没成本式论证、回不了头的步骤。
+
+而当你**在几个还没定的选项间拿不准**时，`weigh` 用加权、暴露异议的议事来投票选。
 
 ## 快速开始
 
@@ -87,9 +90,12 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 | 审**任何计划** | `challenge-plans run trip.md --type plan --sink markdown` |
 | 动手前审一份 **spec** | `challenge-plans run spec.md --type spec --sink markdown` |
 | 审一次**代码改动** | `git diff > c.diff && challenge-plans run c.diff --type diff` |
-| 在多个选项里**选** | `challenge-plans weigh options.yaml --sink markdown` |
+| 审一个**已经做出的决定** | `challenge-plans run decision.md --type decision --sink markdown` |
+| 在多个**还没定的**选项里**选** | `challenge-plans weigh options.yaml --sink markdown` |
 | 让结论用**中文** | 加 `--lang zh` |
 | 当 **CI gate** | 加 `--enforce`（非 approve 退非零） |
+
+**`decision` / `plan` / `weigh` 怎么选？** 看它们落在一个选择的哪个阶段。`weigh` 在你**选之前**：≥2 个还没定的选项，帮你排序。`--type decision` 在你**选定一个之后**：压测这个已下的决定（漏了替代方案？证据撑得起赌注？回得了头？）。`--type plan` 是选定后**要走的步骤**：看它们能不能落地。同一趟旅行——`weigh` 选「飞还是高铁」，`decision` 审「我们决定飞」，`plan` 审逐日行程。
 
 `--profile fast|standard|deep` 在速度和深度间取舍。`[sev✓]` = 跨家族已验证（可硬 gate）；`[sev?]` = 未验证、仅 advisory。可直接跑的样例在 [`examples/`](examples/)。未 pip 安装时前缀 `PYTHONPATH=src python3 -m challenge_plans.cli …`。
 

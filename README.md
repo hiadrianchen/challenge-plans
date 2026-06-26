@@ -20,11 +20,14 @@
 
 ## What it reviews
 
-You don't have to write specs to use this. Three things it does:
+You don't have to write specs to use this. Four things it does:
 
 - 📋 **Any plan** — a trip, a launch, a hire, a move. `--type plan` checks it for the ways plans go wrong (more below).
 - 📝 **A drafted spec or design doc** before you build — `--type spec`.
-- 🔧 **A code change** as a lightweight review — `--type diff`. And when you're **torn between options**, `weigh` votes across them with weighted, dissent-exposing deliberation.
+- 🔧 **A code change** as a lightweight review — `--type diff`.
+- 🧭 **A decision you've already made** — a tech-stack pick, a vendor, a hire. `--type decision` audits the *call itself*: alternatives you skipped, evidence that's thinner than the stakes, sunk-cost reasoning, things you can't undo.
+
+And when you're **torn between options** that are still open, `weigh` votes across them with weighted, dissent-exposing deliberation.
 
 ## Quickstart
 
@@ -87,11 +90,14 @@ Every objection is tagged from a fixed menu of *ways a plan breaks* — which ke
 | Review **any plan** | `challenge-plans run trip.md --type plan --sink markdown` |
 | Review a **spec** before building | `challenge-plans run spec.md --type spec --sink markdown` |
 | Review a **code change** | `git diff > c.diff && challenge-plans run c.diff --type diff` |
-| **Choose** among options | `challenge-plans weigh options.yaml --sink markdown` |
+| Audit a **decision already made** | `challenge-plans run decision.md --type decision --sink markdown` |
+| **Choose** among options still open | `challenge-plans weigh options.yaml --sink markdown` |
 | Get findings in **Chinese** | add `--lang zh` |
 | Use it as a **CI gate** | add `--enforce` (`request_changes` / `inconclusive` / `schema_invalid` exit non-zero; `discuss`/`approve` exit 0) |
 | Use it as a **hard gate** | add `--strict` (only a clean `approve` passes; `discuss` and `approve_with_unverified_timeouts` also fail) |
 | Keep an **audit trail** | add `--save runs/` (writes a timestamped JSON record — tool version + full manifest — per run) |
+
+**`decision` vs `plan` vs `weigh` — which one?** They sit at different points in a choice's life. `weigh` is *before* you've chosen: ≥2 open options, it ranks them. `--type decision` is *after* you've chosen one: it stress-tests that single call (did you skip an alternative, is the evidence real, can you undo it). `--type plan` is the *steps* you'll take once chosen: it checks whether they can actually be executed. Same trip — `weigh` picks fly-vs-train, `decision` audits "we're flying," `plan` reviews the day-by-day itinerary.
 
 `--profile fast|standard|deep` trades speed for depth. `[sev✓]` = an independent model family reproduced it with line-anchored evidence (cross-model *confirmation* — not a mechanically-run test), so it may hard-gate; `[sev?]` = unconfirmed, advisory. Ready-to-run samples live in [`examples/`](examples/). Not pip-installed? Prefix with `PYTHONPATH=src python3 -m challenge_plans.cli …`.
 

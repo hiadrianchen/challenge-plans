@@ -336,10 +336,43 @@ def test_plan_clean_multi_family_approves(tmp_path):
     assert m["verdict"] == "approve" and m["source_diversity"]["families"] == 2
 
 
-def test_decision_still_unsupported(tmp_path):
-    # plan is now supported; decision's enum is still undefined -> rejected before run.
-    with pytest.raises(NotImplementedError):
-        run_challenge(pmk(tmp_path), "decision", "fast", [MockAdapter({}, "mock")])
+def demk(tmp_path, text="We decided to fly instead of taking the train.\nWe already paid a deposit, so it's settled.\nBook the non-refundable fare now.\n"):
+    p = tmp_path / "decision.md"
+    p.write_text(text, encoding="utf-8")
+    return str(p)
+
+
+def test_decision_type_runs_with_decision_failure_types(tmp_path):
+    # `run <decision> --type decision` works (no NotImplementedError) and accepts decision-quality failure types.
+    sc = {"mock:alternatives": cbody([concern(span="L1-1", ft="ignored_alternative")])}
+    m = run_challenge(demk(tmp_path), "decision", "fast", [MockAdapter(sc, "mock")])
+    assert m["artifact_type"] == "decision" and m["verdict"] in {v.value for v in Verdict}
+    real = [c for c in m["concerns"] if c["raised_by"] != ["preflight"]]
+    assert len(real) == 1 and real[0]["failure_type"] == "ignored_alternative"
+
+
+def test_decision_no_frontmatter_preflight_injection(tmp_path):
+    # A decision record is free prose; never inject acceptance_criteria/non_goals synthetic concerns.
+    m = run_challenge(demk(tmp_path), "decision", "fast",
+                      [MockAdapter({"mock:alternatives": cbody([])}, "mock")])
+    assert m["preflight"]["missing_required_to_approve"] == []
+    assert all(c["raised_by"] != ["preflight"] for c in m["concerns"])
+
+
+def test_decision_rejects_plan_failure_type_out_of_enum(tmp_path):
+    # A plan-only failure_type in a decision run is dropped out-of-enum, never silently swallowed.
+    sc = {"mock:alternatives": cbody([concern(span="L1-1", ft="no_fallback")])}
+    m = run_challenge(demk(tmp_path), "decision", "fast", [MockAdapter(sc, "mock")])
+    assert any(d["reason"] == "failure_type_out_of_enum" for d in m["dropped_concerns"])
+    assert [c for c in m["concerns"] if c["raised_by"] != ["preflight"]] == []
+
+
+def test_decision_clean_multi_family_approves(tmp_path):
+    sc = {"claude:alternatives": cbody([]), "gpt:evidence": cbody([]),
+          "claude:reversibility-cost": cbody([])}
+    m = run_challenge(demk(tmp_path), "decision", "standard",
+                      [MockAdapter(sc, "claude"), MockAdapter(sc, "gpt")])
+    assert m["verdict"] == "approve" and m["source_diversity"]["families"] == 2
 
 
 # ── weigh-options deliberation mode ───────────────────────────────────────────

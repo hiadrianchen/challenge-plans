@@ -4,14 +4,14 @@ frame the prompt + whether frontmatter preflight applies.
 What's shared across types is the manifest/rounds/adapters/verdict pipeline; what differs is the
 **rubric and the failure_type enum**. A type whose enum isn't defined isn't allowed into `run`
 (otherwise the canonical concern key can't be computed). This module is the registry of the
-"defined" types: spec / diff / plan are implemented; decision is pending (get_rubric raises
-NotImplementedError, which the CLI turns into a friendly exit).
+"defined" types: spec / diff / plan / decision are implemented. A type whose enum is undefined
+makes get_rubric raise NotImplementedError, which the CLI turns into a friendly exit.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .schema import DiffFailureType, PlanFailureType, SpecFailureType
+from .schema import DecisionFailureType, DiffFailureType, PlanFailureType, SpecFailureType
 
 
 # Spec review lenses: multiple personas on one subscription widen coverage.
@@ -47,6 +47,21 @@ PLAN_PERSONAS: dict[str, str] = {
 }
 
 
+# Decision review lenses: audit a choice already made — fair alternatives, evidence strength,
+# reversibility/downside. Domain-neutral (a hire, a vendor, a tech-stack pick, a strategy call).
+DECISION_PERSONAS: dict[str, str] = {
+    "alternatives": "You care only about: which other options were available and whether they were "
+                    "fairly considered — the road not taken, false dichotomies, an option space "
+                    "narrowed prematurely.",
+    "evidence": "You care only about: whether the reasoning rests on real evidence proportional to "
+                "the stakes, which claims are unverifiable, which assumptions must hold, and whether "
+                "past investment or inertia is doing the arguing.",
+    "reversibility-cost": "You care only about: how hard or costly this is to undo, whether the "
+                          "chosen option's downsides have mitigations, and whether there is a "
+                          "measurable success definition and a trigger to revisit or reverse it.",
+}
+
+
 @dataclass(frozen=True)
 class Rubric:
     artifact_type: str
@@ -62,6 +77,7 @@ class Rubric:
 _SPEC_FAILURE_TYPES = tuple(t.value for t in SpecFailureType if t.value != "contract_violation")
 _DIFF_FAILURE_TYPES = tuple(t.value for t in DiffFailureType)
 _PLAN_FAILURE_TYPES = tuple(t.value for t in PlanFailureType)
+_DECISION_FAILURE_TYPES = tuple(t.value for t in DecisionFailureType)
 
 
 SPEC_RUBRIC = Rubric(
@@ -107,7 +123,26 @@ PLAN_RUBRIC = Rubric(
     frontmatter_preflight=False,
 )
 
-_RUBRICS: dict[str, Rubric] = {r.artifact_type: r for r in (SPEC_RUBRIC, DIFF_RUBRIC, PLAN_RUBRIC)}
+DECISION_RUBRIC = Rubric(
+    artifact_type="decision",
+    artifact_noun="decision",
+    failure_types=_DECISION_FAILURE_TYPES,
+    personas=DECISION_PERSONAS,
+    profile_personas={
+        "fast": ["alternatives"],
+        "standard": ["alternatives", "evidence", "reversibility-cost"],
+        "deep": ["alternatives", "evidence", "reversibility-cost"],
+    },
+    # A decision record is free prose (no required frontmatter fields), like a generic plan —
+    # missing success criteria / review triggers surface as model findings (no_review_trigger),
+    # not a mechanical preflight gate.
+    frontmatter_preflight=False,
+)
+
+_RUBRICS: dict[str, Rubric] = {
+    r.artifact_type: r
+    for r in (SPEC_RUBRIC, DIFF_RUBRIC, PLAN_RUBRIC, DECISION_RUBRIC)
+}
 
 
 def get_rubric(artifact_type: str) -> Rubric:
