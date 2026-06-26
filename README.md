@@ -24,12 +24,12 @@ You don't have to write specs to use this. It works in two modes — **review** 
 
 **Review** (`run`) covers four kinds of artifact:
 
-- 📋 **Any plan** — a trip, a launch, a hire, a move. Feed it a Kyoto itinerary that crams six stops into Day 2 and books a non-refundable flight now: it tells you which day won't fit and which step you can't undo. `--type plan`
-- 📝 **A drafted spec or design doc**, before you build. Give it *"export user CSV asynchronously"*: it presses on what "done" means, who signs off, and which edge case is missing — so you don't build the wrong thing from a vague spec. `--type spec`
-- 🔧 **A code change**, as a lightweight review. Pipe in a `git diff`: it watches for the call site you changed a function but forgot to update, the missing test, the compatibility you quietly broke. `--type diff`
-- 🧭 **A decision you've already made** — a tech-stack pick, a vendor, a hire. Tell it *"we've decided to rewrite the project in TypeScript"*: it pushes back — did you fairly weigh the cheaper option (just clean up the env)? Is the reason sunk cost? Can you even undo this? `--type decision`
+- 📋 **Any plan** (`--type plan`) — a trip, a launch, a hire, a move. Feed it a Kyoto itinerary that crams six stops into Day 2 and books a non-refundable flight now: it tells you which day won't fit and which step you can't undo.
+- 📝 **A drafted spec or design doc** (`--type spec`) — before you build. Give it *"export user CSV asynchronously"*: it presses on what "done" means, who signs off, and which edge case is missing — so you don't build the wrong thing from a vague spec.
+- 🔧 **A code change** (`--type diff`) — a lightweight review. Pipe in a `git diff`: it watches for the call site you changed a function but forgot to update, the missing test, the compatibility you quietly broke.
+- 🧭 **A decision you've already made** (`--type decision`) — a tech-stack pick, a vendor, a hire. Tell it *"we've decided to rewrite the project in TypeScript"*: it pushes back — did you fairly weigh the cheaper option (just clean up the env)? Is the reason sunk cost? Can you even undo this?
 
-**Choose** (`weigh`) is the other mode, for when you're torn between options that are **still open**. Picking among Postgres / MongoDB / SQLite, or three job offers: several AIs vote and rank them, but each model family's weight is capped (so one loud model can't fake a consensus) and the strongest dissent is surfaced — you get a ranking *with* reasons and an opposition, not a blunt one-word answer.
+**Choose** (`weigh`) is the other mode, for when you're torn between options that are **still open** — a technical pick or an everyday-life call alike. Picking among Postgres / MongoDB / SQLite, or between three job offers: several AIs vote and rank them, but each model family's weight is capped (so one loud model can't fake a consensus) and the strongest dissent is surfaced — you get a ranking *with* reasons and an opposition, not a blunt one-word answer.
 
 ## Quickstart
 
