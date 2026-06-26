@@ -44,6 +44,10 @@
 ```bash
 pip install challenge-plans      # 或：pipx install challenge-plans  ·  uvx challenge-plans doctor
 challenge-plans doctor           # 看哪些 CLI 已登录
+
+# 已经装过了？按当初的装法用对应一句命令更新：
+#   pip install -U challenge-plans   ·   pipx upgrade challenge-plans
+#   uvx 跑的是缓存版本——要最新用 `uvx challenge-plans@latest …`（或加 `--refresh`）
 ```
 
 至少有一个已登录的 CLI —— **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`）；两个不同厂商解锁跨家族验证。**作为 agent skill**：把 [SKILL.md](SKILL.md) 放到你 agent 发现 skill 的目录。（要改源码？`git clone … && pip install -e .`。）

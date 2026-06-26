@@ -21,7 +21,8 @@ Harden a plan/spec in multi-agent adversarial review before execution, to reduce
 ## Run
 
 ```bash
-# Installed from PyPI (pip install challenge-plans) — the console command is available directly:
+# Installed from PyPI (pip install challenge-plans) — the console command is available directly.
+# Already installed but on an old version? update: pip install -U challenge-plans (pipx: pipx upgrade; uvx: append @latest).
 challenge-plans doctor                                                            # check adapter login state first
 challenge-plans run <artifact> --type spec --profile standard --sink markdown     # review a plan/spec
 challenge-plans run <artifact> --type spec --profile standard --sink markdown --lang zh   # localized output

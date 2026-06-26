@@ -44,6 +44,10 @@ It sets up the package and reports which backends are ready.
 ```bash
 pip install challenge-plans      # or: pipx install challenge-plans  ·  uvx challenge-plans doctor
 challenge-plans doctor           # which CLIs are logged in
+
+# already installed? update with the matching one-liner:
+#   pip install -U challenge-plans   ·   pipx upgrade challenge-plans
+#   uvx runs a cached copy — use `uvx challenge-plans@latest …` (or `--refresh`) to get the newest
 ```
 
 Bring at least one logged-in CLI — **Claude Code** (`claude`) or **OpenAI Codex** (`codex`); two different vendors unlock cross-family verification. To use it **as an agent skill**, drop [SKILL.md](SKILL.md) where your agent discovers skills. (Developing? `git clone … && pip install -e .`.)
