@@ -122,9 +122,18 @@ It switches only the human-readable prose; JSON keys, enum values, and line anch
 
 Multiple persona/CLI challengers steelman then attack the artifact; a **cross-family Verifier** must reproduce a high/critical objection with line-anchored evidence before it can hard-gate; findings are de-duplicated and resolved into one **6-state verdict** — with an incomplete panel never passing as `approve`. The full mechanism, the two modes, the three-phase deliberation flow, and the 7 failure modes are in **[docs/how-it-works.md](docs/how-it-works.md)**. It also composes with [superpowers](https://github.com/obra/superpowers) and [grill-me](https://github.com/mattpocock/skills) — see there.
 
-## Backends
+## Backends — what you need
 
-Drives whatever subscription coding CLI you already have logged in — **Claude Code** (`claude`) or **OpenAI Codex** (`codex`); not tied to any one. Two different vendors cross-verify findings; with one, results stay advisory. No API keys, no per-token charges from this tool. It needs **at least one** logged-in CLI — `challenge-plans doctor` names each backend's state and the exact fix (install, or log in).
+Drives whatever subscription coding CLI you already have logged in — **Claude Code** (`claude`) or **OpenAI Codex** (`codex`), via their headless mode, on your existing subscription. No API keys, no per-token charges from this tool. It needs **at least one** logged-in CLI; `challenge-plans doctor` names each backend's state and the exact fix (install, or log in).
+
+How much you get depends on how many **different vendors** you have logged in:
+
+| You have | What runs | The catch |
+|---|---|---|
+| **One** (claude *or* codex) | Multiple personas attack from different angles on your one subscription — still far more than asking your model once. | Findings stay **advisory**: nothing model-found can hard-gate, the verdict is capped at `discuss` (a clean run won't reach `approve`), and you get a `low_diversity` warning. The cross-family `[sev✓]` confirmation is **off**. A mechanical `--verify` check (tests/lint failing) *can* still hard-gate, since that's objective evidence, not a model vote. |
+| **Two** (claude *and* codex) | Everything above, **plus** a cross-family Verifier: one vendor's model must independently reproduce a high/critical objection with line-anchored evidence before it can hard-gate. | This is the headline — `[sev✓]` confirmation, real `request_changes`/`approve` verdicts. |
+
+So with one subscription it's a souped-up single-model review; the **cross-family verification that makes a finding hard-gate needs a second, different vendor**.
 
 ## Status
 

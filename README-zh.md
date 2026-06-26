@@ -120,9 +120,18 @@ challenge-plans weigh options.yaml --lang ja          # 议事用日语
 
 多个 persona/CLI challenger 先 steelman 再找漏洞；一条 high/critical 异议必须由**跨家族 Verifier** 用带行锚的证据复现，才能硬 gate；异议去重后收敛成一个**六态 verdict**——面板不完整绝不当作 `approve`。完整机制、两种模式、议事三段流程、7 个失败模式见 **[docs/how-it-works.md](docs/how-it-works.md)**。它也能和 [superpowers](https://github.com/obra/superpowers)、[grill-me](https://github.com/mattpocock/skills) 衔接——详见该文档。
 
-## 后端
+## 后端 —— 你需要什么
 
-驱动你已登录的任一订阅编码 CLI —— **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`），不绑定任何一家。两个不同厂商可互验；只有一个时结论保持 advisory。无 API key、不产生 per-token 费用。**至少要有一个**已登录的 CLI —— `challenge-plans doctor` 会列出每个后端状态和具体修复方式（去装、或登录）。
+驱动你已登录的任一订阅编码 CLI —— **Claude Code**（`claude`）或 **OpenAI Codex**（`codex`），走它们的无头模式、骑你现有的订阅。无 API key、不产生 per-token 费用。**至少要有一个**已登录的 CLI；`challenge-plans doctor` 会列出每个后端状态和具体修复方式（去装、或登录）。
+
+能拿到多少，取决于你登录了几个**不同厂商**：
+
+| 你有 | 跑什么 | 代价 |
+|---|---|---|
+| **一个**（claude *或* codex） | 多个 persona 从不同角度在你这一个订阅上攻——已经比"问你的模型一次"强得多。 | 结论停在 **advisory**：model 发现的东西**都不能硬 gate**，verdict 封顶在 `discuss`（干净跑也到不了 `approve`），并给一个 `low_diversity` 警告。跨家族 `[sev✓]` 确认**关闭**。但 `--verify`（跑测试/lint）的机械失败**仍能硬 gate**——那是客观证据，不靠模型投票。 |
+| **两个**（claude *和* codex） | 以上全部，**外加**跨家族 Verifier：一条 high/critical 异议要被**另一个厂商的模型**用带行锚的证据独立复现，才有硬 gate 资格。 | 这才是头牌——`[sev✓]` 确认、真正的 `request_changes`/`approve`。 |
+
+所以单订阅时它是一份"加强版单模型 review"；**让一条发现能硬 gate 的跨家族验证，需要第二个、不同厂商的后端。**
 
 ## 状态
 
