@@ -18,16 +18,18 @@
 - 🛡️ **Guards 7 multi-agent failure modes** — vote loss, option anchoring, premature hand-off, majority-over-minority, single-round complacency, false consensus, false convergence ([how](docs/how-it-works.md)).
 - 🌍 **Speaks your language** — `--lang zh` (or `ja`, `de`, …) localizes every finding; one flag, no separate build.
 
-## What it reviews
+## What it does
 
-You don't have to write specs to use this. Four things it does:
+You don't have to write specs to use this. It works in two modes — **review** something you've drafted, or **choose** among options.
+
+**Review** (`run`) covers four kinds of artifact:
 
 - 📋 **Any plan** — a trip, a launch, a hire, a move. `--type plan` checks it for the ways plans go wrong (more below).
 - 📝 **A drafted spec or design doc** before you build — `--type spec`.
 - 🔧 **A code change** as a lightweight review — `--type diff`.
 - 🧭 **A decision you've already made** — a tech-stack pick, a vendor, a hire. `--type decision` audits the *call itself*: alternatives you skipped, evidence that's thinner than the stakes, sunk-cost reasoning, things you can't undo.
 
-And when you're **torn between options** that are still open, `weigh` votes across them with weighted, dissent-exposing deliberation.
+**Choose** (`weigh`) is the other mode: when you're **torn between options** that are still open, it votes across them with weighted, dissent-exposing deliberation.
 
 ## Quickstart
 
