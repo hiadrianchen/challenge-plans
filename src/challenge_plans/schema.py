@@ -48,7 +48,7 @@ class ConcernStatus(str, Enum):
     CONFIRMED_UNVERIFIED = "confirmed_unverified"
 
 
-# failure_type enum for spec. plan/decision remain unsupported until their enums exist.
+# failure_type enum for spec. Each artifact type (spec/diff/plan/decision) defines its own below.
 class SpecFailureType(str, Enum):
     AMBIGUITY_TO_WRONG_IMPLEMENTATION = "ambiguity_to_wrong_implementation"
     MISSING_ACCEPTANCE_TEST = "missing_acceptance_test"

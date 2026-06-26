@@ -48,7 +48,7 @@ Bring at least one logged-in CLI — **Claude Code** (`claude`) or **OpenAI Code
 
 ## See it work
 
-Here's the **"any plan"** scenario — one of the three above — on a rough Kyoto-trip plan ([`examples/plan-sample.md`](examples/plan-sample.md)):
+Here's the **"any plan"** scenario — one of the four above — on a rough Kyoto-trip plan ([`examples/plan-sample.md`](examples/plan-sample.md)):
 
 ```text
 $ challenge-plans run examples/plan-sample.md --type plan --sink markdown

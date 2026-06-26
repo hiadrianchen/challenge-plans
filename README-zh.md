@@ -48,7 +48,7 @@ challenge-plans doctor           # 看哪些 CLI 已登录
 
 ## 看它跑
 
-下面是「**任何计划**」这一种情形——上面三种之一——用在一份粗糙的京都旅行攻略上（[`examples/plan-sample.md`](examples/plan-sample.md)）：
+下面是「**任何计划**」这一种情形——上面四种之一——用在一份粗糙的京都旅行攻略上（[`examples/plan-sample.md`](examples/plan-sample.md)）：
 
 ```text
 $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
@@ -93,7 +93,7 @@ $ challenge-plans run examples/plan-sample.md --type plan --sink markdown
 | 审一个**已经做出的决定** | `challenge-plans run decision.md --type decision --sink markdown` |
 | 在多个**还没定的**选项里**选** | `challenge-plans weigh options.yaml --sink markdown` |
 | 让结论用**中文** | 加 `--lang zh` |
-| 当 **CI gate** | 加 `--enforce`（非 approve 退非零） |
+| 当 **CI gate** | 加 `--enforce`（`request_changes`/`inconclusive`/`schema_invalid` 退非零；`discuss`/`approve` 退 0） |
 
 **`decision` / `plan` / `weigh` 怎么选？** 看它们落在一个选择的哪个阶段。`weigh` 在你**选之前**：≥2 个还没定的选项，帮你排序。`--type decision` 在你**选定一个之后**：压测这个已下的决定（漏了替代方案？证据撑得起赌注？回得了头？）。`--type plan` 是选定后**要走的步骤**：看它们能不能落地。同一趟旅行——`weigh` 选「飞还是高铁」，`decision` 审「我们决定飞」，`plan` 审逐日行程。
 

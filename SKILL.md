@@ -30,7 +30,7 @@ challenge-plans run <artifact> --type spec --profile standard --sink markdown --
 ```
 
 - `--type spec|diff|plan|decision`. `diff` reviews a raw `git diff`; **`plan` reviews ANY plan (a trip, a launch, a hire — not just dev specs)** with domain-neutral failure types (missing success criteria / ignored constraint / unaddressed risk / sequencing gap / unstated assumption / goal misalignment / irreversibility / no fallback) and feasibility·risk·goal-alignment lenses; **`decision` audits a choice already made** (ignored alternative / weak evidence / unstated assumption / sunk-cost bias / unaddressed downside / irreversibility / no review trigger / misframed problem) with alternatives·evidence·reversibility-cost lenses. All run the same verdict pipeline.
-- `--profile fast|standard|deep`, `--sink stdout|markdown`, `--enforce` (non-approve verdicts exit non-zero; default advisory exits 0).
+- `--profile fast|standard|deep`, `--sink stdout|markdown`, `--enforce` (`request_changes`/`inconclusive`/`schema_invalid` exit non-zero; `discuss`/`approve` exit 0); `--strict` (hard gate — only a clean `approve` passes); default advisory exits 0.
 - `--lang <code>` (default `en`): write the review prose in the user's language, e.g. `--lang zh`. **Set this from the user's language** so the whole review comes back localized; JSON keys / enums / `L12-15` anchors stay stable. Equivalent to exporting `CHALLENGE_PLANS_LANG`.
 - Output: a 6-state verdict + surviving objections. `[sev✓]` = cross-family Verifier-confirmed, may hard-gate; `[sev?]` = unverified, advisory only.
 

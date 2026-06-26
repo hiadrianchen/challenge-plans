@@ -165,7 +165,7 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                   *, verify_cmds: list[str] | None = None, verify_timeout: int = 120,
                   record_backends: bool = False) -> dict:
     from .prompts import build_challenger_prompt
-    # Reject types without a defined failure_type enum here; plan/decision still raise NotImplementedError.
+    # Reject types without a defined failure_type enum here (get_rubric raises NotImplementedError).
     rubric = get_rubric(artifact_type)
 
     from .preflight import parse_artifact, parse_invalid, preflight_concerns
