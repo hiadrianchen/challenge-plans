@@ -166,6 +166,7 @@ class CaptureFailureReason(str, Enum):
     PARSE_ERROR = "parse_error"
     EMPTY = "empty"
     EXIT_NONZERO = "exit_nonzero"
+    INTERNAL_ERROR = "internal_error"  # Unexpected exception in a voter (prompt build / parse), not a backend failure.
 
 
 @dataclass

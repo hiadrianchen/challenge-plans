@@ -15,10 +15,10 @@ import hashlib
 import json
 import re
 
-from .adapters import MAX_PARALLEL_VOTERS, VoterSpec, strip_marker
+from .adapters import CaptureResult, MAX_PARALLEL_VOTERS, VoterSpec, strip_marker
 from .rubric import SPEC_RUBRIC, get_rubric
 from .schema import (
-    Concern, PanelIntegrity, Severity, Verdict,
+    CaptureFailureReason, Concern, PanelIntegrity, Severity, Verdict,
     resolve_verdict, severity_rank, stricter_verdict,
 )
 
@@ -226,18 +226,25 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
         def _run(adapter, persona, voter_id, _prior=None):
             spec = VoterSpec(voter_id=voter_id, backend=adapter.backend,
                              model_family=adapter.model_family, persona=persona)
-            prompt = build_challenger_prompt(numbered, rubric.artifact_noun, rubric.personas[persona],
-                                             rubric.failure_types, max_findings, prior=_prior)
-            cap = adapter.invoke(prompt, spec)
-            raw = _extract_json(strip_marker(cap.text)) if cap.ok else None
-            repaired = False
-            # Retry ONLY on a parse failure (captured output but unparseable JSON). A capture failure
-            # (timeout / truncation) is NOT retried — re-invoking would just burn another timeout.
-            if cap.ok and raw is None:
-                cap2 = adapter.invoke(prompt + _REPAIR_HINT, spec)
-                raw2 = _extract_json(strip_marker(cap2.text)) if cap2.ok else None
-                if raw2 is not None:
-                    cap, raw, repaired = cap2, raw2, True
+            # Any unexpected error in one voter (prompt build / parse / adapter) must degrade
+            # that voter to a capture failure, never abort the whole panel via fut.result().
+            try:
+                prompt = build_challenger_prompt(numbered, rubric.artifact_noun, rubric.personas[persona],
+                                                 rubric.failure_types, max_findings, prior=_prior)
+                cap = adapter.invoke(prompt, spec)
+                raw = _extract_json(strip_marker(cap.text)) if cap.ok else None
+                repaired = False
+                # Retry ONLY on a parse failure (captured output but unparseable JSON). A capture failure
+                # (timeout / truncation) is NOT retried — re-invoking would just burn another timeout.
+                if cap.ok and raw is None:
+                    cap2 = adapter.invoke(prompt + _REPAIR_HINT, spec)
+                    raw2 = _extract_json(strip_marker(cap2.text)) if cap2.ok else None
+                    if raw2 is not None:
+                        cap, raw, repaired = cap2, raw2, True
+            except Exception:
+                # Labeled INTERNAL_ERROR (not EXIT_NONZERO) so the manifest is honest: the backend
+                # didn't fail — our own prompt-build/parse code raised. Surfaced as a missing voter.
+                return voter_id, spec, CaptureResult(False, "", CaptureFailureReason.INTERNAL_ERROR), None, False
             return voter_id, spec, cap, raw, repaired
 
         results = []

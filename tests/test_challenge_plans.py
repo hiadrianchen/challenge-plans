@@ -115,6 +115,42 @@ def test_marker_substring_does_not_fake_complete(tmp_path):
     assert m["panel_integrity"]["missing"][0]["reason"] == "truncated"
 
 
+class _RaisingAdapter(MockAdapter):
+    def invoke(self, prompt, spec, wall_timeout=150):
+        raise RuntimeError("boom")
+
+
+def test_voter_exception_degrades_not_crashes(tmp_path):
+    # An unexpected error in one voter must degrade it to a capture failure, never abort the panel
+    # via fut.result(). The run completes; the voter is recorded as missing with an honest reason.
+    m = run_challenge(mk(tmp_path), "spec", "fast", [_RaisingAdapter({}, "mock")])
+    assert m["verdict"] in {v.value for v in Verdict}
+    # internal_error (not exit_nonzero): the backend was fine, our own code raised.
+    assert "internal_error" in [x["reason"] for x in m["panel_integrity"]["missing"]]
+
+
+def test_discover_adapters_instantiates_once_and_probes_kept_instance(monkeypatch):
+    # The probe in available() must run on the same instance we keep, not a throwaway.
+    from challenge_plans import cli
+
+    class _CountingAdapter:
+        instances = []
+
+        def __init__(self):
+            self.probed = False
+            _CountingAdapter.instances.append(self)
+
+        def available(self):
+            self.probed = True
+            return True
+
+    monkeypatch.setattr(cli, "_ALL_ADAPTERS", [_CountingAdapter])
+    discovered = cli._discover_adapters()
+    assert len(_CountingAdapter.instances) == 1          # instantiated exactly once
+    assert discovered == [_CountingAdapter.instances[0]]  # the kept instance...
+    assert discovered[0].probed is True                   # ...is the one that was probed
+
+
 def test_low_diversity_caps_discuss(tmp_path):
     # Complete frontmatter with no synthetic concerns + clean single family -> cap at discuss, not approve.
     text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"

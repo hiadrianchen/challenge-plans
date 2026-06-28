@@ -21,7 +21,14 @@ _ALL_ADAPTERS = [ClaudeAdapter, CodexAdapter]
 
 def _discover_adapters() -> list:
     """Cheap run-time discovery of usable adapters (claude if installed; codex if logged in)."""
-    return [a() for a in _ALL_ADAPTERS if a().available()]
+    # Instantiate each adapter once: the probe in available() (e.g. codex's `login status`
+    # subprocess) must run on the same instance we keep, not a throwaway.
+    discovered = []
+    for cls in _ALL_ADAPTERS:
+        adapter = cls()
+        if adapter.available():
+            discovered.append(adapter)
+    return discovered
 
 
 # Default is advisory (does not block CI). Only --enforce maps
