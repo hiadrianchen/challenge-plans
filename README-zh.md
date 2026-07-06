@@ -114,13 +114,13 @@ challenge-plans run plan.md --type plan --lang zh     # 结论用中文
 challenge-plans weigh options.yaml --lang ja          # 议事分析用日语
 ```
 
-它只切换人类可读的文字；JSON 键名、枚举值、行号锚点都保持原样，所以解析和 CI 门禁判定都不受影响（等价于设置环境变量 `CHALLENGE_PLANS_LANG`）。你的 Agent 传入 `--lang <用户语言>`，就能把整份评审本地化。
+它只切换给人读的那部分文字；JSON 键名、枚举值、行号锚点都保持原样，所以解析和 CI 门禁判定都不受影响（等价于设置环境变量 `CHALLENGE_PLANS_LANG`）。你的 Agent 传入 `--lang <用户语言>`，就能把整份评审本地化。
 
 ## 工作原理
 
 多个代表不同评审视角的挑战者会先**充分肯定其合理之处**（steelman），再去找漏洞；一条 high/critical 级别的异议，必须由**跨模型家族的验证者（Verifier）**用带行号锚点的证据独立复现，才能升级为硬门禁；异议去重后收敛成一个**六态裁决**——评审团不完整时，绝不轻易判 `approve`。
 
-**为什么是一个工具，而不是一段提示词 / skill.md / MCP？** 因为难的不是"让模型对抗式地审一遍"——难的是它周围那些**属于控制流、写不进提示词**的保证：得让**另一家厂商**的模型复现之后才算数（不是同一个模型自己判自己）；裁决是**用代码**从存活证据里算出来的，不是模型说了算；回复被截断/超时会被抓出来、而不是静默当作"没问题"；而且它骑你的订阅、不按 token 计费。一句话——**提示词负责产出证据，Python 负责产出裁决。** 逐个脚本干嘛、为什么这么做（9 个模块地图）、两种模式、议事流程、7 种失效模式，全在 **[docs/how-it-works.md](docs/how-it-works.md)**。它也能与 [superpowers](https://github.com/obra/superpowers)、[grill-me](https://github.com/mattpocock/skills) 衔接——详见该文档。
+**为什么是一个工具，而不是一段提示词 / skill.md / MCP？** 难的从来不是"让模型对抗式地审一遍"，而是它周围那些**只能由代码流程保证、写不进提示词**的东西：一条异议，得由**另一家厂商**的模型复现出来才算数，而不是同一个模型自己提、自己判；最终裁决是**代码**从站得住的证据里算出来的，不是模型嘴上说一句"看着还行"；回复被截断或超时会被当场发现，而不是静默地当成"没问题"；而且它**直接用你已登录的订阅**跑，不按 token 计费。一句话——**证据由提示词产出，裁决由代码来下。** 逐个脚本干嘛、为什么这么做（9 个模块地图）、两种模式、议事流程、7 种失效模式，全在 **[docs/how-it-works.md](docs/how-it-works.md)**。它也能与 [superpowers](https://github.com/obra/superpowers)、[grill-me](https://github.com/mattpocock/skills) 衔接——详见该文档。
 
 ## 后端 —— 你需要准备什么
 
