@@ -118,7 +118,9 @@ challenge-plans weigh options.yaml --lang ja          # 议事分析用日语
 
 ## 工作原理
 
-多个代表不同评审视角的挑战者会先**充分肯定其合理之处**（steelman），再去找漏洞；一条 high/critical 级别的异议，必须由**跨模型家族的验证者（Verifier）**用带行号锚点的证据独立复现，才能升级为硬门禁；异议去重后收敛成一个**六态裁决**——评审团不完整时，绝不轻易判 `approve`。完整的机制、两种模式、议事三段流程，以及 7 种多 Agent 失效模式，详见 **[docs/how-it-works.md](docs/how-it-works.md)**。它也能与 [superpowers](https://github.com/obra/superpowers)、[grill-me](https://github.com/mattpocock/skills) 衔接——详见该文档。
+多个代表不同评审视角的挑战者会先**充分肯定其合理之处**（steelman），再去找漏洞；一条 high/critical 级别的异议，必须由**跨模型家族的验证者（Verifier）**用带行号锚点的证据独立复现，才能升级为硬门禁；异议去重后收敛成一个**六态裁决**——评审团不完整时，绝不轻易判 `approve`。
+
+**为什么是一个工具，而不是一段提示词 / skill.md / MCP？** 因为难的不是"让模型对抗式地审一遍"——难的是它周围那些**属于控制流、写不进提示词**的保证：得让**另一家厂商**的模型复现之后才算数（不是同一个模型自己判自己）；裁决是**用代码**从存活证据里算出来的，不是模型说了算；回复被截断/超时会被抓出来、而不是静默当作"没问题"；而且它骑你的订阅、不按 token 计费。一句话——**提示词负责产出证据，Python 负责产出裁决。** 逐个脚本干嘛、为什么这么做（9 个模块地图）、两种模式、议事流程、7 种失效模式，全在 **[docs/how-it-works.md](docs/how-it-works.md)**。它也能与 [superpowers](https://github.com/obra/superpowers)、[grill-me](https://github.com/mattpocock/skills) 衔接——详见该文档。
 
 ## 后端 —— 你需要准备什么
 

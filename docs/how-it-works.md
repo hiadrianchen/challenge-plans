@@ -51,6 +51,34 @@ Traps a naive multi-agent setup almost always falls into — and ones **we hit o
 6. **False consensus** — same-model personas counted as independent votes. **Guard (in code):** per-`model_family` weight cap, raw/weighted both shown, single-family warning.
 7. **False convergence** — declaring "done" when a round found nothing new. **Guard (in code):** `--deep` stops only when a round surfaces zero new concerns (`convergence.reason = no_new_objections`); otherwise it reports `round_cap_reached`, never a false "done".
 
+## Why a tool, and not a prompt / skill.md / MCP
+
+"Adversarial review" as a concept is one prompt away: a `skill.md` or an MCP that says *"review this and list the problems"* gets you a single model narrating worries in prose. That form **structurally cannot** do the things that make the output trustworthy — each of these is a control-flow guarantee, not a wording you can add to a prompt:
+
+- **Independence.** In a prompt the same model both *raises* and *judges* the objection — correlated blind spots sail through. Here a **different vendor's** model must reproduce a high/critical finding with a line anchor before it counts (`verifier.py` + `adapters.py`). Same-family "yes I agree" is explicitly downgraded.
+- **A verdict you can gate on.** Free-text "this seems risky" ×3 from one model isn't three problems and can't block CI. `canonical_key` dedups findings by a mechanical fingerprint, and `resolve_verdict` turns the surviving evidence into one of 6 states **in code — the model never emits the verdict**.
+- **No silent passes.** A truncated or timed-out model in a prompt just *looks* like "no objections found." The capture-integrity + panel checks catch the missing voter, and an incomplete panel can never read as `approve`.
+- **Evidence over headcount.** You can *ask* a prompt not to out-vote a minority that has a reproducible blocker; you can't *enforce* it. The split-aggregation pipeline does, in control flow (adversarial mode bans voting entirely).
+- **Rides your subscription.** An MCP/API wrapper bills per token. The CLI-subprocess transport drives your already-logged-in Claude/Codex quota instead, and strips `ANTHROPIC_*` so it can't silently fall back to a metered API key.
+
+In one line: **the prompts produce evidence; the Python produces the verdict.** That boundary — models are witnesses, code is the judge — is the whole tool.
+
+## What each part does (the module map)
+
+Nine small modules under `src/challenge_plans/`, each owning one guarantee above:
+
+| Module | Job | Why it exists (what a naive form gets wrong) |
+|---|---|---|
+| `schema.py` | Core data model + the **single verdict pipeline**. `canonical_key()` fingerprints each concern (anchor + failure_type + violated field + …); `resolve_verdict()` derives the 6-state verdict mechanically. | The one piece a prompt can't be: the verdict is computed from evidence, **not** asserted by a model. Free-text identity is banned so findings dedup and can't be gamed by re-wording. |
+| `adapters.py` | Transport. One fresh `claude -p` / `codex exec` subprocess per call; strips `ANTHROPIC_*` to force subscription auth; capture-integrity check (`END_MARKER` must be the final line). | Makes a truncated/timed-out reply *detectable* instead of silently trusted; keeps it on your subscription, off per-token billing. |
+| `rubric.py` | Per-artifact-type registry: the `failure_type` enum + review personas + fast/standard/deep profile. | Challengers must pick a failure type from a fixed menu → findings are specific and dedup-able, not prose mush. Different lenses widen coverage on one subscription. |
+| `prompts.py` | The challenger prompt: steelman-first, bind every finding to a line anchor, no hedging + `UNTRUSTED_GUARD` (treat the artifact as untrusted data) + the `END_MARKER` sentinel. | Structures the model's output so it's parseable and integrity-checkable, and defends against injection from the reviewed text. |
+| `engine.py` | The orchestrator: fan out personas × adapters in parallel (capped), parse, dedup by canonical key, run the `--deep` multi-round loop + convergence, panel-integrity, call the Verifier, run `--verify` project checks, assemble the manifest. | Turns many independent model calls into one coherent, convergent, integrity-checked result. |
+| `verifier.py` | The **cross-family Verifier**: for each high/critical concern, pick an adapter from a *different* model family to reproduce it; only a cross-family repro with a line anchor sets `severity_verified`. | The anti-echo-chamber core — one vendor can't both find and bless its own objection. |
+| `deliberation.py` | `weigh` mode: weighted Borda with a per-`model_family` weight cap, the blocker escape gate, exposed strongest-dissent. | Blocks false consensus (same model counted as many votes) and stops a vote from burying a falsifiable minority. |
+| `preflight.py` | Frontmatter/field grading: invalid `artifact_type` → `schema_invalid` (no model run wasted); a missing required field → a synthetic contract-violation concern. | Cheap mechanical gates run *before* spending model calls, and flow through the same verdict pipeline. |
+| `cli.py` | Entrypoint (`run` / `weigh` / `doctor`), exit-code policy (`--enforce` / `--strict` for CI), markdown rendering, `--save` provenance. | The surface an agent or CI actually calls; the exit-code contract is what makes it a *gate*, not just a report. |
+
 ## Fits into your planning workflow
 
 challenge-plans is the **"review before you execute"** step — it composes with planning skills you may already use.

@@ -120,7 +120,9 @@ It switches only the human-readable prose; JSON keys, enum values, and line anch
 
 ## How it works
 
-Multiple persona/CLI challengers steelman then attack the artifact; a **cross-family Verifier** must reproduce a high/critical objection with line-anchored evidence before it can hard-gate; findings are de-duplicated and resolved into one **6-state verdict** — with an incomplete panel never passing as `approve`. The full mechanism, the two modes, the three-phase deliberation flow, and the 7 failure modes are in **[docs/how-it-works.md](docs/how-it-works.md)**. It also composes with [superpowers](https://github.com/obra/superpowers) and [grill-me](https://github.com/mattpocock/skills) — see there.
+Multiple persona/CLI challengers steelman then attack the artifact; a **cross-family Verifier** must reproduce a high/critical objection with line-anchored evidence before it can hard-gate; findings are de-duplicated and resolved into one **6-state verdict** — with an incomplete panel never passing as `approve`.
+
+**Why a tool, and not a one-file prompt / skill.md / MCP?** Because the hard part isn't asking a model to "review adversarially" — it's the guarantees around that, which are control-flow, not wording: a *different vendor* must reproduce a finding before it can gate (not the same model judging itself); the verdict is computed **in code** from surviving evidence, not asserted by a model; a truncated/timed-out reply is caught instead of silently passing; and it rides your subscription instead of billing per token. In one line — **the prompts produce evidence; the Python produces the verdict.** The module-by-module map (what each of the 9 scripts does and why), the two modes, the deliberation flow, and the 7 failure modes are in **[docs/how-it-works.md](docs/how-it-works.md)**. It also composes with [superpowers](https://github.com/obra/superpowers) and [grill-me](https://github.com/mattpocock/skills) — see there.
 
 ## Backends — what you need
 
