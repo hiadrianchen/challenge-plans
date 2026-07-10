@@ -145,6 +145,11 @@ class CodexAdapter:
     product = "OpenAI Codex CLI (ChatGPT subscription)"
     install_hint = "install Codex CLI: https://github.com/openai/codex"
     login_hint = "run `codex` and sign in with your ChatGPT account"
+    update_hint = "update Codex CLI: npm i -g @openai/codex@latest"
+    # Signature of the server-side "your CLI is too old for the assigned model" rejection.
+    # Real repro: HTTP 400 invalid_request_error "The '<model>' model requires a newer version
+    # of Codex" — the model is chosen server-side, so only a real exec (not `login status`) sees it.
+    _too_old_marker = "requires a newer version"
 
     def available(self) -> bool:
         if not shutil.which("codex"):
@@ -156,10 +161,53 @@ class CodexAdapter:
             return False
         return "logged in" in (r.stdout + r.stderr).lower()
 
+    def _probe_exec(self, timeout: int = 90) -> tuple[bool, str]:
+        """One real minimal `codex exec` mirroring invoke()'s flags, for the doctor deep probe.
+
+        `codex login status` can't see a server-side 400 that rejects an out-of-date CLI (the
+        model is assigned server-side), so telling ready from too-old needs a true exec, the way
+        ClaudeAdapter already sends a minimal `claude -p ok`. Only `probe()` calls this and only
+        `doctor` calls `probe()` (the run path uses the cheap available() login check), so normal
+        adversarial runs pay no extra exec. Runs from a neutral temp cwd — the liveness check needs
+        no repo context, so don't hand a real agent read access to whatever repo doctor ran in.
+        Returns (ok, combined_output)."""
+        fd, path = tempfile.mkstemp(suffix=".txt")
+        os.close(fd)
+        cmd = ["codex", "exec", "--skip-git-repo-check", "-s", "read-only",
+               "-c", "model_reasoning_effort=medium", "-o", path, "Reply with exactly: OK"]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                               cwd=tempfile.gettempdir())
+            try:
+                with open(path, encoding="utf-8") as f:
+                    text = f.read()
+            except OSError:
+                text = ""
+            ok = r.returncode == 0 and bool((text or r.stdout).strip())
+            return ok, (text + r.stdout + r.stderr)
+        except subprocess.TimeoutExpired:
+            return False, "timeout"
+        except OSError:
+            return False, "oserror"
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
     def probe(self) -> ProbeState:
         if not shutil.which("codex"):
             return ProbeState.NOT_INSTALLED
-        return ProbeState.READY if self.available() else ProbeState.NOT_LOGGED_IN
+        if not self.available():                    # cheap login gate before the real exec
+            return ProbeState.NOT_LOGGED_IN
+        # Logged in — but only a real exec catches a too-old CLI the server rejects (400). This is
+        # the doctor-only deep probe that fixes codex's "false green" asymmetry with claude.
+        ok, out = self._probe_exec()
+        if ok:
+            return ProbeState.READY
+        if self._too_old_marker in out.lower():
+            return ProbeState.UNSUPPORTED_VERSION
+        return ProbeState.BILLING_UNKNOWN           # logged in but exec returned nothing usable
 
     def version(self) -> str | None:
         """Best-effort CLI version string for provenance/replay; None if unavailable."""

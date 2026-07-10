@@ -807,6 +807,104 @@ def test_adapter_version_none_when_binary_missing(monkeypatch):
     assert CodexAdapter().version() is None
 
 
+# ── codex doctor deep probe: a `login status` check can't see a server-side 400 that rejects a
+#    too-old CLI, so doctor must send a real minimal exec (symmetric to claude's `claude -p ok`)
+#    and report unsupported_version, not a false green. Root cause: real repro was a 400
+#    "the model requires a newer version of Codex" with all flags present. ──
+def test_codex_probe_unsupported_when_server_rejects_old_cli(monkeypatch):
+    # Logged in + flags present, but the real exec 400s on version — must read UNSUPPORTED_VERSION,
+    # not READY. Without the deep exec probe this is the "false green" that wastes real runs.
+    from challenge_plans.adapters import CodexAdapter, ProbeState
+    a = CodexAdapter()
+    monkeypatch.setattr("challenge_plans.adapters.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(a, "available", lambda: True)
+    monkeypatch.setattr(a, "_probe_exec", lambda *_, **__: (
+        False, "error 400 invalid_request_error: the 'gpt-5.6-terra' model requires a newer "
+        "version of codex"))
+    assert a.probe() == ProbeState.UNSUPPORTED_VERSION
+
+
+def test_codex_probe_ready_only_when_real_exec_succeeds(monkeypatch):
+    from challenge_plans.adapters import CodexAdapter, ProbeState
+    a = CodexAdapter()
+    monkeypatch.setattr("challenge_plans.adapters.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(a, "available", lambda: True)
+    monkeypatch.setattr(a, "_probe_exec", lambda *_, **__: (True, "OK\n"))
+    assert a.probe() == ProbeState.READY
+    # logged in but exec yields nothing usable (and not a version error) -> billing_unknown, not ready
+    monkeypatch.setattr(a, "_probe_exec", lambda *_, **__: (False, ""))
+    assert a.probe() == ProbeState.BILLING_UNKNOWN
+
+
+def test_codex_probe_not_logged_in_skips_expensive_exec(monkeypatch):
+    # The cheap login gate must short-circuit before the real exec, and not-installed stays cheapest.
+    from challenge_plans.adapters import CodexAdapter, ProbeState
+    a = CodexAdapter()
+    monkeypatch.setattr("challenge_plans.adapters.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(a, "available", lambda: False)
+    monkeypatch.setattr(a, "_probe_exec", lambda *_, **__: (_ for _ in ()).throw(
+        AssertionError("must not exec when logged out")))
+    assert a.probe() == ProbeState.NOT_LOGGED_IN
+    monkeypatch.setattr("challenge_plans.adapters.shutil.which", lambda _: None)
+    assert a.probe() == ProbeState.NOT_INSTALLED
+
+
+def test_remediation_unsupported_gives_update_command():
+    from challenge_plans.cli import _remediation
+    from challenge_plans.adapters import CodexAdapter, ProbeState
+    hint = _remediation(CodexAdapter(), ProbeState.UNSUPPORTED_VERSION)
+    assert "update" in hint.lower() and "codex" in hint.lower()
+
+
+def test_probe_exec_real_body_across_branches(monkeypatch):
+    # Exercise the REAL _probe_exec body (subprocess NOT stubbed): -o tempfile read, the
+    # `text or stdout` fallback, and the timeout/oserror branches. The dogfood verifier flagged
+    # (✓) that the probe tests above stub _probe_exec out, leaving this body zero real coverage.
+    from challenge_plans import adapters
+    from challenge_plans.adapters import CodexAdapter
+
+    class _P:
+        def __init__(self, rc, out="", err=""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def make_run(rc=0, out="", err="", write_file=None, raise_exc=None):
+        def _run(cmd, **kw):
+            if raise_exc:
+                raise raise_exc
+            if write_file is not None:              # simulate codex writing the -o final message
+                with open(cmd[cmd.index("-o") + 1], "w", encoding="utf-8") as f:
+                    f.write(write_file)
+            return _P(rc, out, err)
+        return _run
+
+    a = CodexAdapter()
+    monkeypatch.setattr(adapters.subprocess, "run", make_run(0, write_file="OK\n"))
+    assert a._probe_exec(timeout=1)[0] is True                       # success via -o tempfile
+    monkeypatch.setattr(adapters.subprocess, "run", make_run(0, out="OK\n"))
+    ok, out = a._probe_exec(timeout=1)
+    assert ok is True and "OK" in out                                # success via stdout fallback
+    monkeypatch.setattr(adapters.subprocess, "run",
+                        make_run(1, err="error 400: requires a newer version of codex"))
+    ok, out = a._probe_exec(timeout=1)
+    assert ok is False and "requires a newer version" in out.lower()  # 400 preserved for classify
+    monkeypatch.setattr(adapters.subprocess, "run",
+                        make_run(raise_exc=adapters.subprocess.TimeoutExpired("codex", 1)))
+    assert a._probe_exec(timeout=1) == (False, "timeout")            # slow exec stays non-fatal
+    monkeypatch.setattr(adapters.subprocess, "run", make_run(raise_exc=OSError("boom")))
+    assert a._probe_exec(timeout=1) == (False, "oserror")
+
+
+def test_codex_probe_timeout_is_billing_unknown_not_ready(monkeypatch):
+    # Intended stricter semantics: a logged-in codex that can't answer in time is "couldn't
+    # verify" (billing_unknown), NOT the old unconditional false-green READY.
+    from challenge_plans.adapters import CodexAdapter, ProbeState
+    a = CodexAdapter()
+    monkeypatch.setattr("challenge_plans.adapters.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr(a, "available", lambda: True)
+    monkeypatch.setattr(a, "_probe_exec", lambda *_, **__: (False, "timeout"))
+    assert a.probe() == ProbeState.BILLING_UNKNOWN
+
+
 # ── #-small: backend versions recorded in provenance only when saving ──
 def test_backends_recorded_only_when_requested(tmp_path):
     sc = {"mock:execution-failure": cbody([])}

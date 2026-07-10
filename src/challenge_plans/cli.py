@@ -228,7 +228,7 @@ def _remediation(adapter, state: ProbeState) -> str:
     if state == ProbeState.INTERACTIVE_ONLY:
         return "only runs interactively here; not usable for non-interactive review"
     if state == ProbeState.UNSUPPORTED_VERSION:
-        return "update this CLI to a supported version"
+        return getattr(adapter, "update_hint", "update this CLI to a supported version")
     return ""
 
 

@@ -44,6 +44,12 @@ challenge-plans needs **at least one logged-in subscription CLI** (it has no mod
 
 `doctor` already prints the per-backend fix plus this guidance; surface it to the user rather than failing silently.
 
+## If a backend is too old / a run degrades or errors opaquely
+
+A **backend CLI that is logged in but out of date** is a distinct failure from "logged out": `login status` still passes, but a real call is rejected server-side (observed: codex 400 "the model requires a newer version of Codex"), so a voter reports `exit_nonzero` and the run silently drops to a single family. A run can't cheaply tell this apart mid-flight — but **`doctor` now can**: it sends a real minimal call per backend, so a too-old codex reads `unsupported_version → update Codex CLI: npm i -g @openai/codex@latest` instead of a false `ready`.
+
+So when a run errors, comes back single-family unexpectedly, or a voter shows `exit_nonzero`: **run `doctor` and update any `unsupported_version` backend before retrying** — don't just report the error to the user. Updating the backend CLI (`npm i -g @openai/codex@latest`, or update Claude Code) is part of the standard fix path, not a dead end to hand back.
+
 ## Presenting to the user
 
 Surface the verdict + **surviving objections (✓ verified vs ? unverified)** + missing required fields as "my cross-review recommendation", then let the user decide — rather than handing them a bare decision. See [README.md](README.md) for the full picture.
