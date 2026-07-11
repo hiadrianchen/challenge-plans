@@ -69,9 +69,10 @@ def weigh_options(question: str, options: list[dict], adapters, profile: str = "
 
     def _run(adapter, lens, voter_id):
         spec = VoterSpec(voter_id=voter_id, backend=adapter.backend,
-                         model_family=adapter.model_family, role="voter", persona=lens)
+                         model_family=adapter.model_family, role="voter", persona=lens,
+                         family_source=getattr(adapter, "family_source", "builtin"))
         cap = adapter.invoke(build_voter_prompt(question, options, lens), spec)
-        return voter_id, adapter.model_family, cap
+        return voter_id, spec, cap
 
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(voters)) as ex:
@@ -79,8 +80,12 @@ def weigh_options(question: str, options: list[dict], adapters, profile: str = "
             results.append(fut.result())
 
     votes, voters_meta = [], []
-    for voter_id, family, cap in results:
-        meta = {"voter_id": voter_id, "model_family": family}
+    user_declared_families: set[str] = set()
+    builtin_families: set[str] = set()  # families with ≥1 collected BUILTIN voter
+    for voter_id, spec, cap in results:
+        family = spec.model_family
+        meta = {"voter_id": voter_id, "model_family": family,
+                "family_source": spec.family_source}
         if not cap.ok:
             panel.missing.append({"voter": voter_id, "reason": cap.reason.value if cap.reason else "unknown"})
             meta["status"] = "capture_failed"; voters_meta.append(meta); continue
@@ -90,6 +95,10 @@ def weigh_options(question: str, options: list[dict], adapters, profile: str = "
             panel.missing.append({"voter": voter_id, "reason": "parse_error"})
             meta["status"] = "parse_error"; voters_meta.append(meta); continue
         panel.collected_voters += 1
+        if spec.family_source == "user_declared":
+            user_declared_families.add(family)
+        else:
+            builtin_families.add(family)
         meta["status"] = "ok"; voters_meta.append(meta)
         votes.append({"voter_id": voter_id, "model_family": family, **parsed})
 
@@ -153,7 +162,13 @@ def weigh_options(question: str, options: list[dict], adapters, profile: str = "
         "raw_weighted_conflict": raw_weighted_conflict,
         "winner_unverified_blocker": blocked.get(winner, []),
         "source_diversity": {"families": len(families), "voters": panel.collected_voters,
-                             "warning": "low_diversity_single_family" if low_diversity else None},
+                             "user_declared_families": sorted(user_declared_families),
+                             # A family cap lifted only by a user-DECLARED (BYO) family is
+                             # asserted diversity, not verified — flag it like engine does
+                             # (per-voter builtin tracking, not name subtraction).
+                             "warning": ("low_diversity_single_family" if low_diversity
+                                         else "diversity_relies_on_user_declared_family"
+                                         if len(builtin_families) <= 1 else None)},
         "panel_integrity": {"expected_voters": panel.expected_voters,
                             "collected_voters": panel.collected_voters,
                             "missing": panel.missing, "complete": panel.complete,

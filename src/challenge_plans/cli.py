@@ -12,7 +12,7 @@ import os
 import sys
 
 from . import __version__
-from .adapters import ClaudeAdapter, CodexAdapter, ProbeState
+from .adapters import ClaudeAdapter, CodexAdapter, ProbeState, discover_byo_adapters
 from .deliberation import weigh_options
 from .engine import run_challenge
 
@@ -28,6 +28,10 @@ def _discover_adapters() -> list:
         adapter = cls()
         if adapter.available():
             discovered.append(adapter)
+    byo, problems = discover_byo_adapters()
+    for p in problems:  # a silently skipped half-configured backend is a footgun — say so
+        print(f"warning: {p}", file=sys.stderr)
+    discovered.extend(a for a in byo if a.available())
     return discovered
 
 
@@ -109,7 +113,12 @@ def _render_markdown(m: dict) -> str:
     for c in m["concerns"]:
         if c["status"] == "rebutted":
             continue
-        mark = "✓" if c.get("severity_verified") else "?"
+        # A ✓ minted through a user-declared (BYO) family is asserted independence, not the
+        # builtin cross-family guarantee — it must render visibly different.
+        mark = "?"
+        if c.get("severity_verified"):
+            mark = ("✓" if c.get("verified_family_source", "builtin") != "user_declared"
+                    else "✓(user-declared family)")
         lines.append(f"- [{c['severity']}{mark}] {c['title']} `@{c['artifact_span']}` "
                      f"({c['failure_type']}, by {','.join(c['raised_by'])})")
     return "\n".join(lines)
@@ -234,16 +243,19 @@ def _remediation(adapter, state: ProbeState) -> str:
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     any_ready = False
-    for cls in _ALL_ADAPTERS:
-        a = cls()
+    byo, problems = discover_byo_adapters()
+    for a in [cls() for cls in _ALL_ADAPTERS] + byo:
         state = a.probe()
         any_ready = any_ready or state == ProbeState.READY
-        line = f"{a.backend} ({a.model_family}): {state.value}"
+        declared = ", user-declared family" if a.family_source == "user_declared" else ""
+        line = f"{a.backend} ({a.model_family}{declared}): {state.value}"
         if state != ProbeState.READY:
             hint = _remediation(a, state)
             if hint:
                 line += f"  → {hint}"
         print(line)
+    for p in problems:
+        print(f"misconfigured: {p}")
     if not any_ready:
         print("\nNo usable backend. challenge-plans drives a logged-in subscription CLI "
               "(no API keys) — it cannot run without at least one.")

@@ -133,7 +133,26 @@ challenge-plans weigh options.yaml --lang ja          # 议事分析用日语
 | **一家**（Claude *或* Codex） | 多个评审视角从不同角度、基于你这一个订阅轮番挑刺——已经比「只问模型一次」强得多。 | 结论只能是**参考**（advisory）：模型发现的问题**都不能设硬门禁**，裁决最高到 `discuss`（即便没发现问题也到不了 `approve`），并附一个 `low_diversity` 警告。跨模型家族的 `[sev✓]` 确认**关闭**。但 `--verify`（跑测试 / lint）的机械失败**仍能硬门禁**——那是客观证据，不靠模型投票。 |
 | **两家**（Claude *和* Codex） | 以上全部，**外加**跨模型家族的验证者：一条 high/critical 异议必须被**另一家厂商的模型**用带行号锚点的证据独立复现，才有硬门禁资格。 | 这才是核心亮点——`[sev✓]` 确认、真正的 `request_changes` / `approve` 裁决。 |
 
-所以单一订阅下，它是一份「加强版的单模型评审」；**要让一条发现具备能硬门禁的跨家族验证，需要接入第二家、不同厂商的后端。**
+所以单一订阅下，它是一份「加强版的单模型评审」；**要让一条发现具备能硬门禁的跨家族验证，需要接入第二家、不同厂商的后端**——可以是另一个内置 CLI，也可以自带一个：
+
+### 自带后端（BYO）
+
+你可以用环境变量注册更多**兼容 Anthropic API** 的后端（GLM、Kimi、DeepSeek、本地代理……）——challenge-plans 用同一个 `claude` CLI 可执行文件驱动它们，只是指向你的端点：
+
+```bash
+export CP_BYO_1_BASE_URL="https://open.bigmodel.cn/api/anthropic"  # 你的端点（必填）
+export CP_BYO_1_FAMILY="glm"      # 你声明它属于哪个模型家族（必填）
+export CP_BYO_1_TOKEN="…"         # 端点 API token（必填——见下面的卫生提醒）
+export CP_BYO_1_MODEL="glm-4.7"   # 可选的模型指定
+# CP_BYO_2_* / CP_BYO_3_* …… 可注册多个
+challenge-plans doctor            # → byo-cli-1 (glm, user-declared family): ready
+```
+
+三条安全/诚实规则是内建的，不是可选项：
+
+- **你声明的家族只是「你的自报」，工具不做核实。** 它看不见你的端点背后真正是什么模型，所以 BYO 家族在 manifest 里全程标注 `user_declared`；经它确认的异议渲染成 `✓(user-declared family)` 而不是内置后端的 `✓`；靠它撑起来的家族多样性会带上 `diversity_relies_on_user_declared_family` 警告。如果你把 `_FAMILY=glm` 指向的其实是另一个 Claude 代理，那是在悄悄污染你自己的评审——这些标注就是为了让读结果的人分得清「自报的多样性」和「内置 claude+gpt 的已验证组合」。
+- **你的 token 不会出现在任何输出里。** 它只被注入该后端自己的子进程环境，绝不进日志、manifest、`--save` 的存档记录或 doctor 输出（base URL 同样不输出——有些服务商会把 key 嵌在 URL 里）。即便如此，也建议用密钥管理器或行首加空格的 `export`，别把 token 留在 shell 历史里。
+- **订阅版 `claude` 后端与 BYO 配置硬隔离。** 默认 adapter 的子进程环境会剥掉 `CP_BYO_*` 和 `ANTHROPIC_*`，你的 Claude 订阅凭据绝不可能被重定向到第三方端点；配置不完整的后端（比如漏了 `_TOKEN`）会带警告跳过，绝不回落到订阅鉴权。
 
 ## 状态
 

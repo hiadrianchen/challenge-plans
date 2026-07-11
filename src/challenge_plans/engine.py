@@ -213,6 +213,8 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
     voters_meta: list[dict] = []
     dropped: list[dict] = []
     families: set[str] = set()
+    user_declared_families: set[str] = set()
+    builtin_families: set[str] = set()  # families with ≥1 collected BUILTIN voter
     rounds_run, converged = 0, False
 
     for rnd in range(1, max_rounds + 1):
@@ -225,7 +227,8 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
 
         def _run(adapter, persona, voter_id, _prior=None):
             spec = VoterSpec(voter_id=voter_id, backend=adapter.backend,
-                             model_family=adapter.model_family, persona=persona)
+                             model_family=adapter.model_family, persona=persona,
+                             family_source=getattr(adapter, "family_source", "builtin"))
             # Any unexpected error in one voter (prompt build / parse / adapter) must degrade
             # that voter to a capture failure, never abort the whole panel via fut.result().
             try:
@@ -257,7 +260,8 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
         new_keys, escalated = 0, False
         for voter_id, spec, cap, raw, repaired in results:
             meta = {"voter_id": voter_id, "backend": spec.backend, "round": rnd,
-                    "model_family": spec.model_family, "transport": spec.transport}
+                    "model_family": spec.model_family, "transport": spec.transport,
+                    "family_source": spec.family_source}
             if not cap.ok:
                 panel.missing.append({"voter": voter_id,
                                       "reason": cap.reason.value if cap.reason else "unknown"})
@@ -271,6 +275,10 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                 continue
             panel.collected_voters += 1
             families.add(spec.model_family)
+            if spec.family_source == "user_declared":
+                user_declared_families.add(spec.model_family)
+            else:
+                builtin_families.add(spec.model_family)
             meta["status"] = "ok"
             if repaired:
                 meta["repaired"] = True
@@ -314,6 +322,14 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
     low_diversity = len(families) <= 1
     if low_diversity:
         verdict = stricter_verdict(verdict, Verdict.DISCUSS)
+    # Honesty guardrail: when lifting the single-family cap depends on a user-DECLARED family
+    # (BYO), the manifest must say so — a mislabeled BYO endpoint could silently be the same
+    # family as a builtin one, so this diversity is asserted by the user, not verified by us.
+    # Tracked per-voter (builtin_families), not by name subtraction: a family name carried by
+    # BOTH a builtin and a BYO voter is still genuinely present via its builtin voter.
+    diversity_warning = ("low_diversity_single_family" if low_diversity
+                         else "diversity_relies_on_user_declared_family"
+                         if len(builtin_families) <= 1 else None)
 
     # Mechanical project checks (--verify): a real test/lint failure is the strongest evidence we
     # can get, so a `failed` check hard-gates to request_changes. errored/timed_out stay advisory.
@@ -323,7 +339,10 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
 
     # Backend CLI versions are only collected when persisting provenance (--save), to keep normal
     # runs free of extra subprocess calls while making saved audit records replay-complete.
+    # Token hygiene: backend records carry name/family/source/version ONLY — never a BYO
+    # base_url (may embed a key in the URL) and never a token.
     backends = ([{"backend": a.backend, "model_family": a.model_family,
+                  "family_source": getattr(a, "family_source", "builtin"),
                   "version": a.version() if hasattr(a, "version") else None}
                  for a in adapters] if record_backends else [])
 
@@ -339,7 +358,8 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
                        else "no_new_objections" if converged else "round_cap_reached"),
         },
         "source_diversity": {"families": len(families), "voters": panel.collected_voters,
-                             "warning": "low_diversity_single_family" if low_diversity else None},
+                             "user_declared_families": sorted(user_declared_families),
+                             "warning": diversity_warning},
         "panel_integrity": {"expected_voters": panel.expected_voters,
                             "collected_voters": panel.collected_voters,
                             "missing": panel.missing, "complete": panel.complete,
@@ -351,7 +371,8 @@ def run_challenge(artifact_path: str, artifact_type: str, profile: str, adapters
         "concerns": [
             {"key": c.key, "artifact_span": c.artifact_span, "failure_type": c.failure_type,
              "severity": c.severity.value, "severity_verified": c.severity_verified,
-             "verified_by": c.verified_by, "title": c.title, "evidence": c.evidence,
+             "verified_by": c.verified_by, "verified_family_source": c.verified_family_source,
+             "title": c.title, "evidence": c.evidence,
              "concrete_failure_step": c.concrete_failure_step,
              "raised_by": sorted(set(raised_by.get(c.key, [c.raised_by]))),
              "status": c.status.value}

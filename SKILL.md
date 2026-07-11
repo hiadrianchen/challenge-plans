@@ -44,6 +44,8 @@ challenge-plans needs **at least one logged-in subscription CLI** (it has no mod
 
 `doctor` already prints the per-backend fix plus this guidance; surface it to the user rather than failing silently.
 
+**BYO backends (optional).** The user can register extra Anthropic-compatible endpoints (GLM/Kimi/a proxy) via env: `CP_BYO_<n>_BASE_URL` + `CP_BYO_<n>_FAMILY` + `CP_BYO_<n>_TOKEN` (all required; `_MODEL` optional; `_1/_2/…` for several). Two caveats to relay honestly: (1) the declared family is **user-declared, not verified** — confirmations through it render `✓(user-declared family)` and diversity built on it is flagged, so never present a BYO pairing as the verified builtin claude+gpt cross-family guarantee; (2) the token goes only into that backend's subprocess and never appears in any output — but advise the user to set it via a secrets manager / leading-space export rather than plain shell history. A backend missing one of the three vars is skipped with a warning (never a fallback to subscription auth).
+
 ## If a backend is too old / a run degrades or errors opaquely
 
 A **backend CLI that is logged in but out of date** is a distinct failure from "logged out": `login status` still passes, but a real call is rejected server-side (observed: codex 400 "the model requires a newer version of Codex"), so a voter reports `exit_nonzero` and the run silently drops to a single family. A run can't cheaply tell this apart mid-flight — but **`doctor` now can**: it sends a real minimal call per backend, so a too-old codex reads `unsupported_version → update Codex CLI: npm i -g @openai/codex@latest` instead of a false `ready`.

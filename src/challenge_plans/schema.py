@@ -140,6 +140,7 @@ class Concern:
     synthetic: bool = False        # True = injected by a contract violation, not a model finding.
     severity_verified: bool = False  # True only after Verifier produces concrete reproduction.
     verified_by: str = ""            # Verifier voter_id.
+    verified_family_source: str = ""  # "builtin" | "user_declared": trust grade of the cross-family pair.
     verification_note: str = ""      # Reproduction/counterevidence summary.
 
     @property

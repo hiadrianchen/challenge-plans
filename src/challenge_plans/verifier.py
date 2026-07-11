@@ -51,6 +51,23 @@ def _raiser_family(concern: Concern) -> str:
     return concern.raised_by.split(":", 1)[0] if concern.raised_by else ""
 
 
+def _family_sources(adapters: list) -> dict[str, str]:
+    """family name -> "builtin" | "user_declared", conservatively.
+
+    A concern's raised_by only carries the family NAME, so if any BYO backend shares a family
+    name with a builtin adapter the name is ambiguous — taint it as user_declared rather than
+    over-claim builtin trust.
+    """
+    src: dict[str, str] = {}
+    for a in adapters:
+        s = getattr(a, "family_source", "builtin")
+        if src.get(a.model_family) == "user_declared" or s == "user_declared":
+            src[a.model_family] = "user_declared"
+        else:
+            src[a.model_family] = "builtin"
+    return src
+
+
 def _pick_verifier(adapters: list, raiser_family: str):
     for a in adapters:  # Prefer a different family for independent verification.
         if a.model_family != raiser_family:
@@ -66,15 +83,25 @@ def verify_concerns(concerns: list[Concern], numbered: str, adapters: list,
                if c.is_alive and c.severity in VERIFY_SEVERITIES and not c.synthetic]
     if not targets or not adapters:
         return []
+    fam_src = _family_sources(adapters)
 
     def _verify(concern: Concern):
         from .engine import _extract_json  # Deferred import avoids a cycle.
         adapter = _pick_verifier(adapters, _raiser_family(concern))
         spec = VoterSpec(voter_id=f"{adapter.model_family}:verifier", backend=adapter.backend,
-                         model_family=adapter.model_family, role="verifier")
+                         model_family=adapter.model_family, role="verifier",
+                         family_source=getattr(adapter, "family_source", "builtin"))
         cap = adapter.invoke(build_verifier_prompt(numbered, concern, artifact_noun), spec)
+        # family_trust: "builtin" only when BOTH sides of the cross-family pair are structurally
+        # true families. Any user-declared side means the independence is asserted, not verified —
+        # a BYO endpoint mislabeled as another family must not mint the builtin-grade ✓.
+        trust = ("builtin"
+                 if spec.family_source == "builtin"
+                 and fam_src.get(_raiser_family(concern), "builtin") == "builtin"
+                 else "user_declared")
         rec = {"concern_key": concern.key, "verifier": spec.voter_id,
-               "cross_family": adapter.model_family != _raiser_family(concern)}
+               "cross_family": adapter.model_family != _raiser_family(concern),
+               "family_trust": trust}
         if not cap.ok:
             rec["assessment"] = "capture_failed"
             rec["reason"] = cap.reason.value if cap.reason else "unknown"
@@ -98,6 +125,7 @@ def verify_concerns(concerns: list[Concern], numbered: str, adapters: list,
             if a == "real" and rec["cross_family"] and concrete:
                 concern.severity_verified = True
                 concern.verified_by = rec["verifier"]
+                concern.verified_family_source = rec["family_trust"]
                 concern.verification_note = note
             elif a == "refuted":
                 concern.status = ConcernStatus.REBUTTED

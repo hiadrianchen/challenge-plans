@@ -925,3 +925,300 @@ def test_cli_render_wording_stays_honest(tmp_path):
     assert "= verified" not in out                          # the old over-claim is gone
     assert "cross-family confirmed" in out
     assert "not a mechanical test" in out
+
+
+# ── #9 BYO-backend guardrails ────────────────────────────────────────────────
+# Guardrail 1: token hygiene — the BYO token exists only in the BYO subprocess env,
+#              never in manifests / provenance / rendered output / diagnostics.
+# Guardrail 2: env isolation — the default claude adapter can never see CP_BYO_* or
+#              ANTHROPIC_* (or a subscription call could hit a third-party endpoint).
+# Guardrail 3: a BYO family is USER-DECLARED — it must be labeled everywhere and can
+#              never mint the builtin-grade cross-family ✓.
+from challenge_plans.adapters import ByoAdapter, ClaudeAdapter, discover_byo_adapters  # noqa: E402
+
+
+def _set_byo(monkeypatch, n=1, family="glm", token="sk-byo-secret-xyz",
+             url="https://byo.example/api/anthropic", model=None):
+    monkeypatch.setenv(f"CP_BYO_{n}_BASE_URL", url)
+    monkeypatch.setenv(f"CP_BYO_{n}_FAMILY", family)
+    monkeypatch.setenv(f"CP_BYO_{n}_TOKEN", token)
+    if model:
+        monkeypatch.setenv(f"CP_BYO_{n}_MODEL", model)
+    return token
+
+
+def test_claude_cli_env_strips_byo_vars(monkeypatch):
+    # Guardrail 2 acceptance: the default claude env sees neither ANTHROPIC_* nor CP_BYO_*.
+    _set_byo(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sub-secret")
+    for env in (claude_cli_env(), ClaudeAdapter()._cli_env()):
+        assert not [k for k in env if k.startswith("CP_BYO_") or k.startswith("ANTHROPIC_")]
+
+
+def test_default_claude_invoke_env_never_sees_byo(monkeypatch):
+    # Guardrail 2, pinned at the subprocess boundary: the env actually handed to `claude -p`
+    # (default adapter) carries no BYO endpoint/token and no ANTHROPIC_* override.
+    token = _set_byo(monkeypatch)
+    from challenge_plans import adapters as ad
+    from challenge_plans.adapters import VoterSpec
+    seen = {}
+
+    class _R:
+        stdout, stderr, returncode = "ok\n" + M, "", 0
+
+    monkeypatch.setattr(ad.subprocess, "run", lambda cmd, **kw: seen.update(env=kw["env"]) or _R())
+    ClaudeAdapter().invoke("hi", VoterSpec("v", "claude-cli", "claude"))
+    assert not [k for k in seen["env"] if k.startswith("CP_BYO_") or k.startswith("ANTHROPIC_")]
+    assert token not in json.dumps(list(seen["env"].values()))
+
+
+def test_byo_env_isolated_per_backend(monkeypatch):
+    # Guardrail 1+2: each BYO subprocess env gets exactly its own endpoint+token, no raw
+    # CP_BYO_* namespace, and never a sibling backend's token.
+    tok1 = _set_byo(monkeypatch, 1, "glm", "sk-token-one", model="glm-4.7")
+    tok2 = _set_byo(monkeypatch, 2, "kimi", "sk-token-two", url="https://kimi.example/api")
+    byo, problems = discover_byo_adapters()
+    assert problems == [] and [a.backend for a in byo] == ["byo-cli-1", "byo-cli-2"]
+    env1 = byo[0]._cli_env()
+    assert env1["ANTHROPIC_BASE_URL"] == "https://byo.example/api/anthropic"
+    assert env1["ANTHROPIC_AUTH_TOKEN"] == tok1
+    assert env1["ANTHROPIC_MODEL"] == "glm-4.7"
+    assert not [k for k in env1 if k.startswith("CP_BYO_")]
+    assert tok2 not in json.dumps(sorted(env1.values()))
+    env2 = byo[1]._cli_env()
+    assert env2["ANTHROPIC_AUTH_TOKEN"] == tok2 and "ANTHROPIC_MODEL" not in env2
+    assert tok1 not in json.dumps(sorted(env2.values()))
+
+
+def test_discover_byo_requires_complete_config(monkeypatch):
+    # A half-configured backend (missing TOKEN) must be skipped loudly — a missing token
+    # could otherwise fall back to subscription auth against a third-party endpoint.
+    monkeypatch.setenv("CP_BYO_1_BASE_URL", "https://byo.example/api")
+    monkeypatch.setenv("CP_BYO_1_FAMILY", "GLM")
+    tok = _set_byo(monkeypatch, 2, "kimi", "sk-ok")
+    byo, problems = discover_byo_adapters()
+    assert len(byo) == 1 and byo[0].backend == "byo-cli-2"
+    assert byo[0].model_family == "kimi" and byo[0].family_source == "user_declared"
+    assert len(problems) == 1 and "CP_BYO_1_TOKEN" in problems[0]
+    assert tok not in problems[0] and "byo.example" not in problems[0]  # names only, never values
+
+
+def test_byo_token_never_in_manifest_provenance_or_render(monkeypatch, tmp_path):
+    # Guardrail 1 acceptance: run a real ByoAdapter through the engine (subprocess faked) and
+    # assert the token and base_url appear nowhere in manifest, markdown, or saved provenance.
+    token = _set_byo(monkeypatch)
+    from challenge_plans import adapters as ad
+    from challenge_plans.cli import _render_markdown, _save_provenance
+
+    class _R:
+        stdout, stderr, returncode = cbody([]), "", 0
+
+    monkeypatch.setattr(ad.subprocess, "run", lambda cmd, **kw: _R())
+    monkeypatch.setattr(ad.shutil, "which", lambda _: "/usr/bin/claude")
+    byo, _ = discover_byo_adapters()
+    sc = {"claude:execution-failure": cbody([])}
+    m = run_challenge(mk(tmp_path), "spec", "fast", [MockAdapter(sc, "claude"), byo[0]],
+                      record_backends=True)
+    everything = json.dumps(m) + _render_markdown(m)
+    prov = _save_provenance(m, str(tmp_path / "prov"))
+    everything += (tmp_path / "prov" / prov.split("/")[-1]).read_text(encoding="utf-8")
+    assert token not in everything
+    assert "byo.example" not in everything  # base_url may embed a key → also excluded
+    assert m["backends"][1]["family_source"] == "user_declared"
+
+
+def test_doctor_labels_byo_and_leaks_no_token(monkeypatch, capsys):
+    token = _set_byo(monkeypatch)
+    from challenge_plans import adapters as ad
+    from challenge_plans.cli import _cmd_doctor
+
+    class _R:
+        stdout, stderr, returncode = "ok", "", 0
+
+    monkeypatch.setattr(ad.subprocess, "run", lambda cmd, **kw: _R())
+    monkeypatch.setattr(ad.shutil, "which", lambda _: "/usr/bin/x")
+    _cmd_doctor(None)
+    out = capsys.readouterr().out
+    assert "byo-cli-1 (glm, user-declared family)" in out
+    assert token not in out
+
+
+def test_family_sources_taints_ambiguous_name():
+    # A family NAME shared by a builtin and a BYO adapter is ambiguous → conservatively
+    # user_declared, in either registration order.
+    from challenge_plans.verifier import _family_sources
+    a, b = MockAdapter({}, "gpt"), MockAdapter({}, "gpt", family_source="user_declared")
+    assert _family_sources([a, b]) == {"gpt": "user_declared"}
+    assert _family_sources([b, a]) == {"gpt": "user_declared"}
+
+
+def test_user_declared_verify_still_gates_but_labeled(tmp_path):
+    # Guardrail 3 acceptance: a ✓ minted through a user-declared family still gates
+    # (fail-safe direction) but is labeled user_declared in concern, verification record,
+    # diversity block, and markdown — it can't pass as the builtin cross-family guarantee.
+    from challenge_plans.cli import _render_markdown
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    sc = {"claude:execution-failure": cbody([concern()]), "glm:correctness": cbody([]),
+          "claude:scope-boundary": cbody([]),
+          "glm:verifier": vbody("real", "At L2, unauthorized export is possible")}
+    m = run_challenge(mk(tmp_path, text), "spec", "standard",
+                      [MockAdapter(sc, "claude"),
+                       MockAdapter(sc, "glm", family_source="user_declared")])
+    c = [c for c in m["concerns"] if c["raised_by"] != ["preflight"]][0]
+    assert m["verdict"] == "request_changes" and c["severity_verified"]
+    assert c["verified_family_source"] == "user_declared"
+    assert m["verifications"][0]["family_trust"] == "user_declared"
+    assert m["source_diversity"]["user_declared_families"] == ["glm"]
+    assert m["source_diversity"]["warning"] == "diversity_relies_on_user_declared_family"
+    assert "✓(user-declared family)" in _render_markdown(m)
+
+
+def test_builtin_cross_family_verify_stays_builtin(tmp_path):
+    # Control: the builtin claude+gpt pair keeps the plain ✓ and no diversity warning.
+    from challenge_plans.cli import _render_markdown
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    sc = {"claude:execution-failure": cbody([concern()]), "gpt:correctness": cbody([]),
+          "claude:scope-boundary": cbody([]),
+          "gpt:verifier": vbody("real", "At L2, unauthorized export can leak PHI")}
+    m = run_challenge(mk(tmp_path, text), "spec", "standard",
+                      [MockAdapter(sc, "claude"), MockAdapter(sc, "gpt")])
+    c = [c for c in m["concerns"] if c["raised_by"] != ["preflight"]][0]
+    assert c["severity_verified"] and c["verified_family_source"] == "builtin"
+    assert m["verifications"][0]["family_trust"] == "builtin"
+    assert m["source_diversity"]["user_declared_families"] == []
+    assert m["source_diversity"]["warning"] is None
+    assert "user-declared" not in _render_markdown(m)
+
+
+def test_deliberation_labels_user_declared_diversity():
+    m = weigh_options("Choose Alpha or Beta?", _OPTS,
+                      [MockAdapter({"claude:execution-failure": _vb(["A", "B"]),
+                                    "claude:scope-boundary": _vb(["A", "B"])}, "claude"),
+                       MockAdapter({"glm:correctness": _vb(["A", "B"])}, "glm",
+                                   family_source="user_declared")])
+    assert m["recommendation"] == "A"  # cap lifted, but honestly labeled:
+    assert m["source_diversity"]["user_declared_families"] == ["glm"]
+    assert m["source_diversity"]["warning"] == "diversity_relies_on_user_declared_family"
+
+
+def test_byo_invoke_injects_own_env_at_subprocess_boundary(monkeypatch):
+    # Pin the subprocess boundary itself (not just _cli_env()): the env actually handed to
+    # the BYO `claude -p` call carries this backend's endpoint+token and no raw CP_BYO_*.
+    token = _set_byo(monkeypatch)
+    from challenge_plans import adapters as ad
+    from challenge_plans.adapters import VoterSpec
+    seen = {}
+
+    class _R:
+        stdout, stderr, returncode = "ok\n" + M, "", 0
+
+    monkeypatch.setattr(ad.subprocess, "run", lambda cmd, **kw: seen.update(env=kw["env"]) or _R())
+    byo, _ = discover_byo_adapters()
+    byo[0].invoke("hi", VoterSpec("v", "byo-cli-1", "glm", family_source="user_declared"))
+    assert seen["env"]["ANTHROPIC_BASE_URL"] == "https://byo.example/api/anthropic"
+    assert seen["env"]["ANTHROPIC_AUTH_TOKEN"] == token
+    assert not [k for k in seen["env"] if k.startswith("CP_BYO_")]
+
+
+def test_two_builtin_families_plus_byo_no_warning(tmp_path):
+    # Boundary of `len(families - user_declared) <= 1`: with TWO builtin families collected,
+    # adding a BYO family must not trigger the user-declared diversity warning.
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    sc = {"claude:execution-failure": cbody([]), "gpt:correctness": cbody([]),
+          "glm:scope-boundary": cbody([])}
+    m = run_challenge(mk(tmp_path, text), "spec", "standard",
+                      [MockAdapter(sc, "claude"), MockAdapter(sc, "gpt"),
+                       MockAdapter(sc, "glm", family_source="user_declared")])
+    assert m["source_diversity"]["families"] == 3
+    assert m["source_diversity"]["user_declared_families"] == ["glm"]
+    assert m["source_diversity"]["warning"] is None
+
+
+def test_mixed_builtin_byo_same_family_no_warning_misfire(tmp_path):
+    # A family name carried by BOTH a builtin and a BYO voter (builtin gpt + BYO declaring
+    # "gpt") is still genuinely present via its builtin voter: with builtin claude+gpt
+    # collected, the user-declared warning must NOT misfire.
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    sc = {"claude:execution-failure": cbody([]), "gpt:correctness": cbody([]),
+          "gpt:scope-boundary": cbody([])}
+    # Panel round-robin over 3 adapters: claude(builtin), gpt(builtin), gpt(BYO-declared).
+    m = run_challenge(mk(tmp_path, text), "spec", "standard",
+                      [MockAdapter(sc, "claude"), MockAdapter(sc, "gpt"),
+                       MockAdapter(sc, "gpt", family_source="user_declared")])
+    assert m["source_diversity"]["user_declared_families"] == ["gpt"]
+    assert m["source_diversity"]["warning"] is None  # builtin claude+gpt genuinely collected
+
+
+def test_discover_adapters_wires_byo_and_warns_on_incomplete(monkeypatch, capsys):
+    # The run path itself must pick up complete BYO backends and surface incomplete ones
+    # on stderr — not just the discover_byo_adapters() helper in isolation.
+    from challenge_plans import adapters as ad, cli
+    monkeypatch.setattr(cli, "_ALL_ADAPTERS", [])
+    monkeypatch.setenv("CP_BYO_1_BASE_URL", "https://byo.example/api")  # incomplete: no FAMILY/TOKEN
+    _set_byo(monkeypatch, 2, "kimi", "sk-ok")
+    monkeypatch.setattr(ad.shutil, "which", lambda _: "/usr/bin/claude")
+    discovered = cli._discover_adapters()
+    assert [a.backend for a in discovered] == ["byo-cli-2"]
+    err = capsys.readouterr().err
+    assert "CP_BYO_1_FAMILY" in err and "CP_BYO_1_TOKEN" in err
+    assert "sk-ok" not in err  # names only, never values
+
+
+def test_byo_raiser_builtin_verifier_still_tainted_end_to_end(tmp_path):
+    # Taint works in BOTH directions: a concern RAISED by the BYO family and confirmed by a
+    # builtin verifier is still user_declared trust — the raiser's family is only asserted.
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    sc = {"glm:execution-failure": cbody([concern()]), "claude:correctness": cbody([]),
+          "glm:scope-boundary": cbody([]),
+          "claude:verifier": vbody("real", "At L2, unauthorized export is possible")}
+    m = run_challenge(mk(tmp_path, text), "spec", "standard",
+                      [MockAdapter(sc, "glm", family_source="user_declared"),
+                       MockAdapter(sc, "claude")])
+    c = [c for c in m["concerns"] if c["raised_by"] != ["preflight"]][0]
+    assert c["severity_verified"] and c["verified_family_source"] == "user_declared"
+    assert m["verifications"][0]["family_trust"] == "user_declared"
+
+
+def test_byo_second_family_lifts_cap_to_approve_with_warning(tmp_path):
+    # A clean run where the SECOND family is BYO: the single-family discuss cap lifts to
+    # approve (that's what BYO is for), but the diversity warning stays — asserted, not verified.
+    text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
+    sc = {"claude:execution-failure": cbody([]), "glm:correctness": cbody([]),
+          "claude:scope-boundary": cbody([])}
+    m = run_challenge(mk(tmp_path, text), "spec", "standard",
+                      [MockAdapter(sc, "claude"),
+                       MockAdapter(sc, "glm", family_source="user_declared")])
+    assert m["verdict"] == "approve"
+    assert m["source_diversity"]["warning"] == "diversity_relies_on_user_declared_family"
+
+
+def test_doctor_prints_misconfigured_problem_lines(monkeypatch, capsys):
+    # doctor must surface half-configured BYO backends (its "misconfigured:" branch),
+    # naming the missing vars and never leaking a configured sibling's token.
+    token = _set_byo(monkeypatch, 1, "glm", "sk-doctor-secret")
+    monkeypatch.setenv("CP_BYO_2_BASE_URL", "https://half.example/api")  # no FAMILY/TOKEN
+    from challenge_plans import adapters as ad
+    from challenge_plans.cli import _cmd_doctor
+
+    class _R:
+        stdout, stderr, returncode = "ok", "", 0
+
+    monkeypatch.setattr(ad.subprocess, "run", lambda cmd, **kw: _R())
+    monkeypatch.setattr(ad.shutil, "which", lambda _: "/usr/bin/x")
+    _cmd_doctor(None)
+    out = capsys.readouterr().out
+    assert "misconfigured:" in out
+    assert "CP_BYO_2_FAMILY" in out and "CP_BYO_2_TOKEN" in out
+    assert token not in out and "half.example" not in out
+
+
+def test_deliberation_two_builtin_families_plus_byo_no_warning():
+    # weigh-mode boundary, mirroring the engine one: two BUILTIN families collected means
+    # the user-declared warning must not fire even with a BYO voter present.
+    m = weigh_options("Choose Alpha or Beta?", _OPTS,
+                      [MockAdapter({"claude:execution-failure": _vb(["A", "B"])}, "claude"),
+                       MockAdapter({"gpt:correctness": _vb(["A", "B"])}, "gpt"),
+                       MockAdapter({"glm:scope-boundary": _vb(["A", "B"])}, "glm",
+                                   family_source="user_declared")])
+    assert m["source_diversity"]["user_declared_families"] == ["glm"]
+    assert m["source_diversity"]["warning"] is None

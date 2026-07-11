@@ -135,7 +135,26 @@ How much you get depends on how many **different vendors** you have logged in:
 | **One** (claude *or* codex) | Multiple personas attack from different angles on your one subscription — still far more than asking your model once. | Findings stay **advisory**: nothing model-found can hard-gate, the verdict is capped at `discuss` (a clean run won't reach `approve`), and you get a `low_diversity` warning. The cross-family `[sev✓]` confirmation is **off**. A mechanical `--verify` check (tests/lint failing) *can* still hard-gate, since that's objective evidence, not a model vote. |
 | **Two** (claude *and* codex) | Everything above, **plus** a cross-family Verifier: one vendor's model must independently reproduce a high/critical objection with line-anchored evidence before it can hard-gate. | This is the headline — `[sev✓]` confirmation, real `request_changes`/`approve` verdicts. |
 
-So with one subscription it's a souped-up single-model review; the **cross-family verification that makes a finding hard-gate needs a second, different vendor**.
+So with one subscription it's a souped-up single-model review; the **cross-family verification that makes a finding hard-gate needs a second, different vendor** — either the other builtin CLI, or a backend you bring yourself:
+
+### Bring your own backend (BYO)
+
+You can register extra backends that speak the **Anthropic-compatible API** (GLM, Kimi, DeepSeek, a local proxy, …) through environment variables — challenge-plans drives them with the same `claude` CLI binary, pointed at your endpoint:
+
+```bash
+export CP_BYO_1_BASE_URL="https://open.bigmodel.cn/api/anthropic"  # your endpoint (required)
+export CP_BYO_1_FAMILY="glm"      # the model family YOU declare it to be (required)
+export CP_BYO_1_TOKEN="…"         # endpoint API token (required — see the hygiene note)
+export CP_BYO_1_MODEL="glm-4.7"   # optional model override
+# CP_BYO_2_* / CP_BYO_3_* … register more backends
+challenge-plans doctor            # → byo-cli-1 (glm, user-declared family): ready
+```
+
+Three safety/honesty rules are built in, not optional:
+
+- **The declared family is your word, not something the tool verifies.** It cannot see what actually serves your endpoint, so BYO families are labeled `user_declared` throughout the manifest, a confirmation minted through one renders as `✓(user-declared family)` instead of the builtin `✓`, and diversity that depends on it carries a `diversity_relies_on_user_declared_family` warning. Point `_FAMILY=glm` at what is really another Claude proxy and you are silently polluting your own review — the labels exist so a reader can tell asserted diversity from the verified builtin claude+gpt pair.
+- **Your token stays out of every output.** It is injected only into that backend's own subprocess env, and never appears in logs, manifests, `--save` provenance records, or doctor output (base URLs are excluded from outputs too, since some providers embed keys in them). Still, prefer a secrets manager or a leading-space `export` over pasting tokens into your shell history.
+- **The subscription `claude` backend is hard-isolated from BYO config.** The default adapter strips `CP_BYO_*` and `ANTHROPIC_*` from its subprocess env, so your Claude subscription credentials can never be redirected to a third-party endpoint. A half-configured backend (e.g. missing `_TOKEN`) is skipped with a warning instead of ever falling back to subscription auth.
 
 ## Status
 

@@ -7,6 +7,7 @@ as later increments.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -19,6 +20,10 @@ from .schema import CaptureFailureReason
 # Defensive ceiling on concurrent subprocesses. The panel is normally tiny (a few personas),
 # but cap it so an oversized persona list can't fan out into a thread/subprocess storm.
 MAX_PARALLEL_VOTERS = 8
+
+# BYO-backend env namespace: CP_BYO_<n>_BASE_URL / _FAMILY / _TOKEN (+ optional _MODEL).
+_BYO_PREFIX = "CP_BYO_"
+_BYO_INDEX_RE = re.compile(r"^CP_BYO_(\d+)_")
 
 
 class ProbeState(str, Enum):
@@ -47,11 +52,21 @@ class VoterSpec:
     persona: str = "execution-failure"
     model: str | None = None
     effort: str | None = None
+    # "builtin" = the family is structurally true (distinct vendor CLI + subscription).
+    # "user_declared" = BYO backend; the family is whatever the user typed, unverified.
+    family_source: str = "builtin"
 
 
 def claude_cli_env() -> dict[str, str]:
-    """Use Claude Code's logged-in CLI auth, not inherited Anthropic API env."""
-    return {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_")}
+    """Use Claude Code's logged-in CLI auth, not inherited Anthropic API env.
+
+    Also strips every CP_BYO_* var: the default claude adapter must never see BYO endpoint
+    config, or a subscription-authenticated call could be redirected to a third-party
+    endpoint (irrevocable credential leak). BYO subprocess env is built separately and
+    independently in ByoAdapter._cli_env().
+    """
+    return {k: v for k, v in os.environ.items()
+            if not k.startswith("ANTHROPIC_") and not k.startswith(_BYO_PREFIX)}
 
 
 def strip_marker(text: str) -> str:
@@ -83,9 +98,15 @@ class ClaudeAdapter:
 
     backend = "claude-cli"
     model_family = "claude"
+    family_source = "builtin"
     product = "Claude Code (Claude subscription)"
     install_hint = "install Claude Code: https://docs.claude.com/en/docs/claude-code"
     login_hint = "run `claude`, then `/login` (needs a Claude Pro/Max subscription)"
+
+    def _cli_env(self) -> dict[str, str]:
+        # Overridden by ByoAdapter; the default subscription path stays on claude_cli_env()'s
+        # mandatory ANTHROPIC_*/CP_BYO_* stripping and must not weaken it.
+        return claude_cli_env()
 
     def available(self) -> bool:
         # Cheap discovery during run: include it optimistically if installed; login failures
@@ -99,7 +120,7 @@ class ClaudeAdapter:
         try:
             r = subprocess.run(["claude", "-p", "--output-format", "text", "ok"],
                                capture_output=True, text=True, timeout=60,
-                               env=claude_cli_env())
+                               env=self._cli_env())
         except subprocess.TimeoutExpired:
             return ProbeState.BILLING_UNKNOWN
         except OSError:
@@ -115,7 +136,7 @@ class ClaudeAdapter:
             return None
         try:
             r = subprocess.run(["claude", "--version"], capture_output=True, text=True,
-                               timeout=20, env=claude_cli_env())
+                               timeout=20, env=self._cli_env())
         except (subprocess.TimeoutExpired, OSError):
             return None
         return r.stdout.strip() or None
@@ -129,7 +150,7 @@ class ClaudeAdapter:
         cmd = ["claude", "-p", "--output-format", "text", prompt]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=wall_timeout,
-                               env=claude_cli_env())
+                               env=self._cli_env())
         except subprocess.TimeoutExpired:
             return CaptureResult(False, "", CaptureFailureReason.TIMEOUT)
         except OSError:
@@ -137,11 +158,80 @@ class ClaudeAdapter:
         return check_capture(r.stdout, r.returncode)
 
 
+class ByoAdapter(ClaudeAdapter):
+    """BYO backend: `claude -p` pointed at a user-supplied Anthropic-compatible endpoint.
+
+    Configured purely from env (`CP_BYO_<n>_BASE_URL/_FAMILY/_TOKEN`, optional `_MODEL`) — the
+    standard way third-party providers (GLM/Kimi/DeepSeek...) expose Anthropic-compatible APIs
+    to the claude CLI. The built-in claude/codex adapters are untouched by this class.
+
+    Honesty boundary: `model_family` here is whatever the user declared — the tool cannot verify
+    what actually serves the endpoint, so it is plumbed through as family_source="user_declared"
+    and must never be presented as the built-in cross-family guarantee.
+
+    Token hygiene: the token lives only on this instance and in the env of THIS adapter's own
+    subprocesses. It must never reach logs, diagnostics, manifests, or provenance records.
+    """
+
+    family_source = "user_declared"
+    install_hint = "BYO backends drive the claude CLI binary; " + ClaudeAdapter.install_hint
+    update_hint = ""
+
+    def __init__(self, index: int, *, base_url: str, family: str, token: str,
+                 model: str | None = None):
+        self.backend = f"byo-cli-{index}"
+        self.model_family = family
+        self.product = f"BYO backend #{index} (declared family: {family}, via claude CLI)"
+        self.login_hint = (f"check CP_BYO_{index}_TOKEN and CP_BYO_{index}_BASE_URL "
+                           "(endpoint rejected the request)")
+        self._base_url = base_url
+        self._token = token
+        self._model = model
+
+    def _cli_env(self) -> dict[str, str]:
+        # Independent isolation: start from an env with ANTHROPIC_* and ALL CP_BYO_* stripped,
+        # then inject only this backend's endpoint + token — so backend 1's subprocess can never
+        # see backend 2's token, and the raw CP_BYO_* namespace never propagates.
+        env = claude_cli_env()
+        env["ANTHROPIC_BASE_URL"] = self._base_url
+        env["ANTHROPIC_AUTH_TOKEN"] = self._token
+        if self._model:
+            env["ANTHROPIC_MODEL"] = self._model
+        return env
+
+
+def discover_byo_adapters() -> tuple[list[ByoAdapter], list[str]]:
+    """Scan env for CP_BYO_<n>_* backends -> (adapters, problems).
+
+    A backend needs BASE_URL + FAMILY + TOKEN (all non-empty); anything incomplete is skipped
+    and reported as a problem string. Problem strings name env VARIABLES only — never their
+    values (a BASE_URL can embed a key, a TOKEN is one).
+    """
+    indices = sorted({int(m.group(1)) for k in os.environ
+                      if (m := _BYO_INDEX_RE.match(k))})
+    adapters, problems = [], []
+    for n in indices:
+        base_url = os.environ.get(f"CP_BYO_{n}_BASE_URL", "").strip()
+        family = os.environ.get(f"CP_BYO_{n}_FAMILY", "").strip().lower()
+        token = os.environ.get(f"CP_BYO_{n}_TOKEN", "").strip()
+        model = os.environ.get(f"CP_BYO_{n}_MODEL", "").strip() or None
+        missing = [f"CP_BYO_{n}_{name}" for name, v in
+                   (("BASE_URL", base_url), ("FAMILY", family), ("TOKEN", token)) if not v]
+        if missing:
+            problems.append(f"byo backend #{n} incomplete — missing " + ", ".join(missing)
+                            + " (a missing TOKEN could otherwise fall back to subscription "
+                              "auth against a third-party endpoint)")
+            continue
+        adapters.append(ByoAdapter(n, base_url=base_url, family=family, token=token, model=model))
+    return adapters, problems
+
+
 class CodexAdapter:
     """transport=cli, using local `codex exec` (ChatGPT subscription) as the GPT-family peer."""
 
     backend = "codex-cli"
     model_family = "gpt"
+    family_source = "builtin"
     product = "OpenAI Codex CLI (ChatGPT subscription)"
     install_hint = "install Codex CLI: https://github.com/openai/codex"
     login_hint = "run `codex` and sign in with your ChatGPT account"
@@ -257,10 +347,13 @@ class MockAdapter:
 
     backend = "mock"
     model_family = "mock"
+    family_source = "builtin"
 
-    def __init__(self, scripted: dict[str, str], model_family: str = "mock"):
+    def __init__(self, scripted: dict[str, str], model_family: str = "mock",
+                 family_source: str = "builtin"):
         self._scripted = scripted
         self.model_family = model_family
+        self.family_source = family_source
 
     def available(self) -> bool:
         return True

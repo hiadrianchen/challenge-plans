@@ -12,4 +12,4 @@ try:
     # Single source of truth: the installed package metadata (from pyproject) — never drifts.
     __version__ = version("challenge-plans")
 except PackageNotFoundError:  # running from a source tree without an install
-    __version__ = "0.1.4"
+    __version__ = "0.1.5"
