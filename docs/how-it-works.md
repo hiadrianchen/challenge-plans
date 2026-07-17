@@ -26,7 +26,7 @@ drafted artifact (plan / spec / diff / any plan) + bounded context
   → (--deep: loop the panel — each round is shown prior findings and hunts new ones — until a round adds nothing new, or the round cap)
 ```
 
-**Cross-family verification** is the core guarantee: a high/critical objection only earns hard-gate authority (`✓`) when an *independent model family* reproduces it with concrete, line-anchored evidence. This is **cross-model confirmation, not a mechanically-run test** — another family says "yes, here's the line"; nothing runs your code. (For `--type diff`, wiring in real test/typecheck/lint verification is on the Roadmap.) A single model's claim stays advisory (`?`). That's why bringing two different vendors (e.g. Claude Code + Codex) matters — they check each other.
+**Cross-family verification** is the core guarantee: a high/critical objection only earns hard-gate authority (`✓`) when an *independent model family* reproduces it with concrete, line-anchored evidence. This is **cross-model confirmation, not a mechanically-run test** — another family says "yes, here's the line"; nothing runs your code. (For code diffs, `--verify` can additionally run your own tests/lint as project-level mechanical checks that hard-gate on failure; per-finding targeted verification is on the Roadmap.) A single model's claim stays advisory (`?`). That's why bringing two different vendors (e.g. Claude Code + Codex) matters — they check each other. Only have one subscription? A **BYO backend** (env-configured Anthropic-compatible endpoint — see the README) can supply the second family, labeled `user_declared` throughout: the tool cannot verify what actually serves your endpoint, so a ✓ minted through one renders as `✓(user-declared family)`, distinct from the builtin guarantee.
 
 ## Deliberation (a strict three-phase flow)
 
@@ -105,9 +105,9 @@ Concern dedup is exact-anchor only; no idle-timeout (wall-clock only); deliberat
 
 Honest about what isn't built yet. By default challenge-plans is **advisory** (a human/agent review pass); `--strict` turns it into a hard gate, but the gate's strength is still LLM cross-model confirmation, not mechanical proof. Planned, roughly in order:
 
-- **Mechanical verification for `--type diff`** — run tests / typecheck / lint / static analysis (not just a second LLM) before a code finding can hard-gate. Today the `✓` is cross-model confirmation, not a test run.
+- **Per-finding mechanical verification** — project-level `--verify` (your own tests/lint; a failure hard-gates) shipped in 0.1.3. Still planned: generating and running a *targeted* reproduction per finding, so an individual `✓` can be a test run instead of cross-model confirmation.
 - **Robust source anchors** — block id / content hash / git hunk range instead of bare line numbers, so findings survive edits to long-lived artifacts.
 - **Injection detection** — the artifact is already framed as untrusted input (every reviewer is told to treat the delimited content as data, ignore instructions embedded in it, and flag manipulation attempts), and a malformed challenger reply now gets one schema-repair retry before the voter is dropped. Still planned: a dedicated injection detector.
-- **Backend provider abstraction** — CLI transport today; SDK / API / `manual_paste` planned, each declaring data-egress, quota, and timeout policy.
+- **Backend provider abstraction** — CLI transport today, and since 0.1.5 **BYO backends** (env-configured Anthropic-compatible endpoints, with user-declared family labeling and token/env isolation guardrails). Still planned: SDK / `manual_paste` transports, each declaring data-egress, quota, and timeout policy.
 
 These came out of adversarial review of challenge-plans itself — fittingly.
