@@ -1222,3 +1222,266 @@ def test_deliberation_two_builtin_families_plus_byo_no_warning():
                                    family_source="user_declared")])
     assert m["source_diversity"]["user_declared_families"] == ["glm"]
     assert m["source_diversity"]["warning"] is None
+
+
+# ── #10 Kimi builtin adapter: the family claim must be earned, not declared ───────────
+# kimi-code is a MULTI-PROVIDER client, so unlike claude/codex a "kimi" label can be false
+# (config.toml can repoint `kimi -p` at any vendor, out of reach of env stripping). These tests
+# pin the four properties that keep family_source="builtin" honest:
+#   1. only the login-managed Kimi provider qualifies (managed: + type=kimi + oauth, all three);
+#   2. the verified alias is the alias pinned with -m (no probe-time/run-time gap);
+#   3. nothing qualifying => the voter is WITHHELD, never relabelled or silently degraded;
+#   4. a transient failure is not absence (one flaky call must not delete a family for a run).
+import tempfile  # noqa: E402
+from challenge_plans.adapters import (  # noqa: E402
+    KimiAdapter, ProbeState, VoterSpec, check_capture, strip_marker,
+)
+
+# Captured verbatim from a real `kimi provider list --json` (kimi-code 0.19.2, logged in). This
+# fixture IS the version-churn trigger: if kimi-code renames `type`/`oauth` or reshapes --json,
+# this is where it surfaces, while the field behaviour stays fail-closed (family withheld).
+_KIMI_JSON = {
+    "providers": {
+        "managed:kimi-code": {
+            "type": "kimi",
+            "apiKey": "",
+            "baseUrl": "https://api.kimi.com/coding/v1",
+            "oauth": {"storage": "file", "key": "oauth/kimi-code"},
+        }
+    },
+    "models": {
+        "kimi-code/kimi-for-coding": {"provider": "managed:kimi-code", "model": "kimi-for-coding"},
+        "kimi-code/kimi-for-coding-highspeed": {"provider": "managed:kimi-code",
+                                                "model": "kimi-for-coding-highspeed"},
+        "kimi-code/k3": {"provider": "managed:kimi-code", "model": "k3"},
+    },
+}
+# Captured verbatim from the real human `kimi provider list` — the only surface exposing the
+# default (--json has no defaultModel key).
+_KIMI_HUMAN = ("managed:kimi-code  type=kimi  models=3  source=oauth\n\n"
+               "Default model: kimi-code/kimi-for-coding\n")
+
+
+class _Ran:
+    """Fake subprocess.run dispatching on argv, recording every command issued."""
+
+    def __init__(self, cfg=_KIMI_JSON, human=_KIMI_HUMAN, answer="ok\n" + M, rc=0, json_rc=0):
+        self.cfg, self.human, self.answer, self.rc, self.json_rc = cfg, human, answer, rc, json_rc
+        self.cmds, self.envs, self.cwds = [], [], []
+
+    def __call__(self, cmd, **kw):
+        self.cmds.append(cmd)
+        self.envs.append(kw.get("env") or {})
+        self.cwds.append(kw.get("cwd"))
+        out, rc = "", 0
+        if cmd[:3] == ["kimi", "provider", "list"]:
+            if "--json" in cmd:
+                out, rc = (json.dumps(self.cfg) if self.cfg is not None else ""), self.json_rc
+            else:
+                out = self.human or ""
+        elif cmd[:2] == ["kimi", "-p"]:
+            out, rc = self.answer, self.rc
+        elif cmd[:2] == ["kimi", "--version"]:
+            out = "0.19.2\n"
+        return type("R", (), {"stdout": out, "stderr": "", "returncode": rc})()
+
+
+def _kimi(monkeypatch, ran, installed=True):
+    from challenge_plans import adapters as ad
+    monkeypatch.setattr(ad.shutil, "which", lambda b: "/usr/bin/kimi" if installed else None)
+    monkeypatch.setattr(ad.subprocess, "run", ran)
+    return KimiAdapter()
+
+
+def test_kimi_resolves_real_fixture_and_honours_configured_default(monkeypatch):
+    # Property 1+2 on the real captured shape. The default qualifies, so it is honoured rather
+    # than overridden — all three aliases are equally Kimi-family, so the user's pick stands.
+    a = _kimi(monkeypatch, _Ran())
+    assert a._resolve().alias == "kimi-code/kimi-for-coding"
+    assert a.available() is True
+
+
+@pytest.mark.parametrize("mutate,label", [
+    (lambda c: c["providers"].__setitem__("managed:kimi-code",
+        {**c["providers"]["managed:kimi-code"], "type": "openai"}), "type is not kimi"),
+    (lambda c: c["providers"]["managed:kimi-code"].pop("oauth"), "no oauth (pasted key, not login)"),
+])
+def test_kimi_withholds_when_managed_provider_signature_breaks(monkeypatch, mutate, label):
+    # Property 1: each signal is load-bearing — drop any one and the family is withheld, not
+    # asserted. This is the case a `provider catalog` import would land in.
+    cfg = json.loads(json.dumps(_KIMI_JSON))
+    mutate(cfg)
+    a = _kimi(monkeypatch, _Ran(cfg=cfg))
+    assert a._resolve().alias is None
+    assert a.available() is False, f"must withhold when {label}"
+    assert a.probe() == ProbeState.FAMILY_UNVERIFIED
+
+
+def test_kimi_withholds_user_added_provider_even_if_kimi_typed(monkeypatch):
+    # Property 1: `provider add` cannot mint a builtin family. A non-`managed:` provider is
+    # user-configured, so it never carries the login-managed guarantee even when kimi-typed.
+    cfg = {"providers": {"custom:proxy": {"type": "kimi", "apiKey": "sk-live-SECRET",
+                                          "baseUrl": "https://proxy.example/v1",
+                                          "oauth": {"storage": "file", "key": "x"}}},
+           "models": {"custom/whatever": {"provider": "custom:proxy", "model": "whatever"}}}
+    a = _kimi(monkeypatch, _Ran(cfg=cfg))
+    assert a._resolve().alias is None
+    assert a.probe() == ProbeState.FAMILY_UNVERIFIED
+
+
+def test_kimi_never_leaks_provider_secrets(monkeypatch):
+    # Token hygiene (0.1.5 rule extends): `provider list --json` embeds apiKey/baseUrl, and a
+    # user-added provider's apiKey is a LIVE secret. Only the alias may survive resolution.
+    cfg = json.loads(json.dumps(_KIMI_JSON))
+    cfg["providers"]["managed:kimi-code"]["apiKey"] = "sk-live-SECRET"
+    a = _kimi(monkeypatch, _Ran(cfg=cfg))
+    a._resolve()
+    leaked = json.dumps({k: str(v) for k, v in vars(a).items()})
+    assert "sk-live-SECRET" not in leaked
+    assert "api.kimi.com" not in leaked
+
+
+def test_kimi_substitution_is_never_silent(monkeypatch, capsys):
+    # Property 2: when the configured default is NOT served by the managed provider we still pin a
+    # verified alias — but the user must be told their default was not used.
+    human = "managed:kimi-code  type=kimi  models=3  source=oauth\n\nDefault model: other/gpt-4o\n"
+    a = _kimi(monkeypatch, _Ran(human=human))
+    assert a._resolve().alias == "kimi-code/k3"          # lexicographically first, deterministic
+    assert "other/gpt-4o" in capsys.readouterr().err
+
+
+def test_kimi_pins_the_alias_it_verified(monkeypatch):
+    # Property 2, at the subprocess boundary: -m carries the resolved alias, so the family we
+    # verified is the family that answers. default_model is never trusted unverified.
+    ran = _Ran()
+    a = _kimi(monkeypatch, ran)
+    a.invoke("hi", VoterSpec("v", "kimi-cli", "kimi"))
+    call = [c for c in ran.cmds if c[:2] == ["kimi", "-p"]][0]
+    assert call[call.index("-m") + 1] == "kimi-code/kimi-for-coding"
+    assert "--output-format" in call and call[call.index("--output-format") + 1] == "text"
+
+
+def test_kimi_invoke_env_never_sees_byo(monkeypatch):
+    # Guardrail 2 extends to every builtin adapter: a BYO endpoint/token must never reach a
+    # subscription-authenticated kimi subprocess.
+    _set_byo(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sub-secret")
+    ran = _Ran()
+    a = _kimi(monkeypatch, ran)
+    a.invoke("hi", VoterSpec("v", "kimi-cli", "kimi"))
+    for env in ran.envs:
+        assert not [k for k in env if k.startswith("CP_BYO_") or k.startswith("ANTHROPIC_")]
+
+
+def test_kimi_transient_failure_is_not_absence(monkeypatch):
+    # Property 4: a failing `provider list --json` is UNKNOWN, not "this user has no Kimi". It
+    # must not be memoised, or one flaky call would delete the family for the rest of the run.
+    ran = _Ran(json_rc=1)
+    a = _kimi(monkeypatch, ran)
+    res = a._resolve()
+    assert res.transient_error is True and res.alias is None
+    assert a.probe() == ProbeState.BILLING_UNKNOWN
+    assert a._resolved is None, "a transient failure must never be cached as absence"
+    ran.json_rc = 0                                       # the next call recovers
+    assert a._resolve().alias == "kimi-code/kimi-for-coding"
+
+
+def test_kimi_malformed_providers_shape_withholds_not_crashes(monkeypatch):
+    # Property 4 hardening: a truthy non-dict `providers` (a garbled/future --json) must fail
+    # closed — withhold the family — not raise TypeError out of available()/probe() and take the
+    # whole run down with it.
+    a = _kimi(monkeypatch, _Ran(cfg={"providers": 5, "models": {}}))
+    assert a._resolve().alias is None
+    assert a.available() is False
+    assert a.probe() == ProbeState.NOT_LOGGED_IN     # non-dict -> provider_count 0, not a crash
+
+
+def test_kimi_configured_default_parses_real_human_output(monkeypatch):
+    # Regression pin for the ONE unstable surface: the default lives only in human `provider list`
+    # output. If a future kimi-code reshapes the `Default model:` line this fails here (loud),
+    # rather than silently returning None and dropping the user's configured default.
+    a = _kimi(monkeypatch, _Ran())
+    assert a._configured_default() == "kimi-code/kimi-for-coding"
+
+
+def test_kimi_logged_out_is_distinct_from_repointed(monkeypatch):
+    # No providers at all = never logged in (actionable: log in). Providers present but none
+    # Kimi = repointed (actionable: check provider list). Same withheld voter, different fix.
+    a = _kimi(monkeypatch, _Ran(cfg={"providers": {}, "models": {}}))
+    assert a.probe() == ProbeState.NOT_LOGGED_IN
+
+
+def test_kimi_probe_catches_expired_auth_that_config_cannot(monkeypatch):
+    # Config resolution proves intent, not liveness: an expired oauth token leaves the provider
+    # entry intact, so only a real call can tell ready from logged-out. The auth signal is the
+    # `/login` marker kimi prints — not a bare exit code (see the transient test below).
+    a = _kimi(monkeypatch, _Ran(answer="Session expired. Please run /login\n", rc=1))
+    assert a.probe() == ProbeState.NOT_LOGGED_IN
+
+
+def test_kimi_probe_login_marker_wins_even_on_zero_exit(monkeypatch):
+    # The `/login` branch is independent of the return code: if kimi prints a login prompt while
+    # exiting 0, that is still logged-out, not READY.
+    a = _kimi(monkeypatch, _Ran(answer="please /login to continue\n", rc=0))
+    assert a.probe() == ProbeState.NOT_LOGGED_IN
+
+
+def test_kimi_probe_bare_nonzero_is_transient_not_logout(monkeypatch):
+    # A nonzero exit WITHOUT a /login marker is a network/rate-limit/billing/internal blip. It
+    # must read as BILLING_UNKNOWN, never NOT_LOGGED_IN — don't send a logged-in user to relogin.
+    a = _kimi(monkeypatch, _Ran(answer="upstream 503\n", rc=1))
+    assert a.probe() == ProbeState.BILLING_UNKNOWN
+
+
+def test_kimi_probe_empty_stdout_is_unknown_not_ready(monkeypatch):
+    # A clean exit with nothing on stdout proves nothing about the subscription; it must not
+    # masquerade as READY.
+    a = _kimi(monkeypatch, _Ran(answer="", rc=0))
+    assert a.probe() == ProbeState.BILLING_UNKNOWN
+
+
+def test_kimi_probe_ready_and_runs_outside_the_repo(monkeypatch):
+    # `kimi -p` is an agent; a liveness check needs no repo context, so don't hand it read access
+    # to whatever repo doctor happened to run in.
+    ran = _Ran()
+    a = _kimi(monkeypatch, ran)
+    assert a.probe() == ProbeState.READY
+    probe_cwd = [c for cmd, c in zip(ran.cmds, ran.cwds) if cmd[:2] == ["kimi", "-p"]][0]
+    assert probe_cwd == tempfile.gettempdir()
+
+
+def test_kimi_not_installed(monkeypatch):
+    a = _kimi(monkeypatch, _Ran(), installed=False)
+    assert a.probe() == ProbeState.NOT_INSTALLED
+    assert a.available() is False
+    assert a.version() is None
+
+
+def test_kimi_render_shape_still_parses(monkeypatch):
+    # kimi's stdout is RENDERED, not raw: "• " prefix, 2-space indented continuations, and a
+    # ```json fence. It parses today only incidentally — _extract_json scans for `{`, and
+    # check_capture/strip_marker use .strip(). Nothing contracts the renderer to stay this way,
+    # so pin the real observed shape; if kimi changes it, this fails here rather than in the field
+    # (where it would degrade to capture_failed — loud, and never a wrong verdict).
+    from challenge_plans.engine import _extract_json
+    rendered = ('• ```json\n'
+                '  {\n'
+                '    "verdict": "request_changes",\n'
+                '    "objections": [{"severity": "high", "title": "t"}]\n'
+                '  }\n'
+                '  ```\n\n'
+                '  ' + M + '\n\n')
+    cap = check_capture(rendered, 0)
+    assert cap.ok, "bullet/fence/indent must not defeat the END_MARKER integrity check"
+    obj = _extract_json(strip_marker(rendered))
+    assert obj is not None and obj["verdict"] == "request_changes"
+
+
+def test_kimi_family_is_builtin_and_reaches_doctor(monkeypatch):
+    from challenge_plans.cli import _ALL_ADAPTERS, _remediation
+    assert KimiAdapter in _ALL_ADAPTERS, "adapter must be registered or it can never be discovered"
+    assert KimiAdapter.family_source == "builtin" and KimiAdapter.model_family == "kimi"
+    # A withheld family must be explained, not merely absent.
+    hint = _remediation(KimiAdapter(), ProbeState.FAMILY_UNVERIFIED)
+    assert "provider" in hint.lower() and hint != ""
+    assert "/login" in _remediation(KimiAdapter(), ProbeState.NOT_LOGGED_IN)

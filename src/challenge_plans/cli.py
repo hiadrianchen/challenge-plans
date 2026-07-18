@@ -12,11 +12,11 @@ import os
 import sys
 
 from . import __version__
-from .adapters import ClaudeAdapter, CodexAdapter, ProbeState, discover_byo_adapters
+from .adapters import ClaudeAdapter, CodexAdapter, KimiAdapter, ProbeState, discover_byo_adapters
 from .deliberation import weigh_options
 from .engine import run_challenge
 
-_ALL_ADAPTERS = [ClaudeAdapter, CodexAdapter]
+_ALL_ADAPTERS = [ClaudeAdapter, CodexAdapter, KimiAdapter]
 
 
 def _discover_adapters() -> list:
@@ -238,6 +238,10 @@ def _remediation(adapter, state: ProbeState) -> str:
         return "only runs interactively here; not usable for non-interactive review"
     if state == ProbeState.UNSUPPORTED_VERSION:
         return getattr(adapter, "update_hint", "update this CLI to a supported version")
+    if state == ProbeState.FAMILY_UNVERIFIED:
+        return getattr(adapter, "unverified_hint",
+                       "logged in, but this CLI is pointed at a provider whose family we cannot "
+                       "verify — the family is withheld rather than asserted")
     return ""
 
 

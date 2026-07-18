@@ -6,10 +6,12 @@ as later increments.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from enum import Enum
@@ -33,6 +35,10 @@ class ProbeState(str, Enum):
     BILLING_UNKNOWN = "billing_unknown"
     UNSUPPORTED_VERSION = "unsupported_version"
     NOT_INSTALLED = "not_installed"
+    # Installed and logged in, but the CLI is pointed at a provider we cannot tie to the vendor
+    # whose family this adapter claims. Distinct from NOT_LOGGED_IN so a withheld family is
+    # explained rather than merely absent (only multi-provider CLIs like kimi can reach this).
+    FAMILY_UNVERIFIED = "family_unverified"
 
 
 @dataclass
@@ -340,6 +346,223 @@ class CodexAdapter:
                 os.unlink(path)
             except OSError:
                 pass
+
+
+@dataclass
+class _KimiResolution:
+    """Outcome of resolving which model `kimi -p` will actually serve.
+
+    The three cases are deliberately distinct: a transient failure must never be mistaken for
+    "this user has no Kimi", or one flaky subprocess would delete a family for the whole run.
+    """
+    alias: str | None = None        # verified Kimi alias to pin with -m
+    transient_error: bool = False   # call failed/unparseable — unknown, retry later, do not cache
+    provider_count: int = 0         # providers configured at all (0 => logged out, not repointed)
+
+
+class KimiAdapter:
+    """transport=cli, using local `kimi -p` (Kimi membership subscription) as the Kimi-family peer.
+
+    Why this adapter is not a copy of ClaudeAdapter: kimi-code is a MULTI-PROVIDER client
+    (`provider add`, `provider catalog` importing from models.dev, `-m <alias>`, and
+    `default_model` in config.toml). A user can legitimately point `kimi -p` at a non-Moonshot
+    model, at which point family_source="builtin" would assert a cross-family guarantee that is
+    false — a claude-vs-"kimi" panel could really be claude-vs-claude. That redirect lives in a
+    config FILE, so claude_cli_env()'s env stripping (which is what makes claude/codex safe as
+    single-vendor CLIs) cannot reach it.
+
+    So the family claim is re-derived from observed config on every run rather than hardcoded:
+    _resolve() accepts only an alias served by the login-managed Kimi provider, and invoke() pins
+    that exact alias with -m — the alias we verify IS the alias we run, so there is no
+    probe-time/run-time gap and `default_model` is never trusted unverified. When nothing
+    qualifies the voter is WITHHELD, not relabelled: a "kimi" voter that is not Kimi has negative
+    value, since it consumes a panel slot while corrupting the family count. Withholding is loud
+    (the family disappears from doctor and source_diversity); degrading would be quiet.
+
+    Known, accepted residue: a hand-forged `managed:`-prefixed, kimi-typed, oauth-bearing provider
+    whose baseUrl secretly proxies another vendor still qualifies. That hole is not closable
+    locally — the user owns the machine, so any check we add is equally forgeable — and the threat
+    model here is self-deception, not attack: the only victim is the user's own review. What this
+    DOES catch is the unaware user (repointed by `provider catalog`, a tutorial, or a teammate)
+    being told "cross-family verified" when it was not.
+    """
+
+    backend = "kimi-cli"
+    model_family = "kimi"
+    family_source = "builtin"
+    product = "Kimi Code CLI (Kimi membership subscription)"
+    install_hint = "install Kimi Code: https://moonshotai.github.io/kimi-code/"
+    login_hint = "run `kimi`, then `/login` (needs a Kimi membership subscription)"
+    unverified_hint = ("logged in, but no login-managed Kimi provider is configured — `kimi` is "
+                       "pointed at another provider, so the kimi family cannot be verified and is "
+                       "withheld; run `kimi provider list` to check, or use a BYO backend instead")
+    # The login-managed provider's signature. `managed:` is created by `kimi login` (not by
+    # `provider add`), `type` is kimi-code's OWN typing of the vendor (a models.dev-imported
+    # OpenAI provider does not get "kimi"), and oauth means subscription auth over a pasted key.
+    _MANAGED_PREFIX = "managed:"
+    _PROVIDER_TYPE = "kimi"
+    # `provider list --json` carries providers/models but no default; the human output is the only
+    # surface exposing it. Anchored to a whole line so it cannot match inside another field.
+    _DEFAULT_MODEL_RE = re.compile(r"^Default model:\s*(\S+)\s*$", re.MULTILINE)
+
+    def __init__(self) -> None:
+        self._resolved: str | None = None   # memoised on success only, never on failure
+
+    def _cli_env(self) -> dict[str, str]:
+        # Builtin adapter: reuse the mandatory CP_BYO_* stripping so a BYO backend's endpoint/token
+        # can never leak into a subscription-authenticated kimi subprocess.
+        return claude_cli_env()
+
+    def _provider_config(self) -> dict | None:
+        """Parse `kimi provider list --json` -> config dict; None on any transient failure.
+
+        Token hygiene (0.1.5 BYO rule extends here): this output embeds `apiKey` and `baseUrl`.
+        Both are empty/harmless for the oauth-managed provider, but a user-added provider's apiKey
+        is a LIVE SECRET. Only the resolved alias escapes this method — the raw JSON must never
+        reach logs, diagnostics, manifests, or provenance.
+        """
+        try:
+            r = subprocess.run(["kimi", "provider", "list", "--json"], capture_output=True,
+                               text=True, timeout=30, env=self._cli_env())
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if r.returncode != 0:
+            return None
+        try:
+            cfg = json.loads(r.stdout)
+        except json.JSONDecodeError:
+            return None
+        return cfg if isinstance(cfg, dict) else None
+
+    def _qualifying_aliases(self, cfg: dict) -> list[str]:
+        """Model aliases served by the login-managed Kimi provider, sorted for determinism.
+
+        All three signals are required together; any one alone is too weak to carry a builtin
+        family claim. Sorted so two runs on one machine can never silently disagree on the pick.
+        """
+        providers, models = cfg.get("providers"), cfg.get("models")
+        if not isinstance(providers, dict) or not isinstance(models, dict):
+            return []
+        managed = {pid for pid, p in providers.items()
+                   if isinstance(p, dict)
+                   and pid.startswith(self._MANAGED_PREFIX)
+                   and p.get("type") == self._PROVIDER_TYPE
+                   and p.get("oauth")}
+        return sorted(alias for alias, m in models.items()
+                      if isinstance(m, dict) and m.get("provider") in managed)
+
+    def _configured_default(self) -> str | None:
+        """The user's `Default model:` alias; None if unavailable (best-effort, never fatal)."""
+        try:
+            r = subprocess.run(["kimi", "provider", "list"], capture_output=True, text=True,
+                               timeout=30, env=self._cli_env())
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        m = self._DEFAULT_MODEL_RE.search(r.stdout)
+        return m.group(1) if m else None
+
+    def _resolve(self) -> _KimiResolution:
+        """Decide which alias to pin. Success is memoised; failure never is."""
+        if self._resolved:
+            return _KimiResolution(alias=self._resolved)
+        cfg = self._provider_config()
+        if cfg is None:
+            return _KimiResolution(transient_error=True)
+        # Fail closed on a malformed shape: a truthy non-dict `providers` (e.g. a number from a
+        # future/garbled --json) must withhold, never crash available()/probe() with a TypeError.
+        providers = cfg.get("providers")
+        n = len(providers) if isinstance(providers, dict) else 0
+        aliases = self._qualifying_aliases(cfg)
+        if not aliases:
+            return _KimiResolution(provider_count=n)
+        default = self._configured_default()
+        if default in aliases:
+            chosen = default              # honour the user's pick: all qualifying aliases are Kimi
+        else:
+            chosen = aliases[0]
+            if default:
+                # Never substitute silently — the user chose a default and we are not using it.
+                print(f"warning: kimi default model {default!r} is not served by the login-managed "
+                      f"Kimi provider; pinning {chosen!r} instead", file=sys.stderr)
+        self._resolved = chosen
+        return _KimiResolution(alias=chosen, provider_count=n)
+
+    def available(self) -> bool:
+        # Run-path discovery. Costs up to two `provider list` calls (--json for the providers, then
+        # human output for the default) on the first call per run, memoised on success — the price
+        # of not asserting an unverified family; codex's available() already shells out too.
+        if not shutil.which("kimi"):
+            return False
+        return self._resolve().alias is not None
+
+    def probe(self) -> ProbeState:
+        if not shutil.which("kimi"):
+            return ProbeState.NOT_INSTALLED
+        res = self._resolve()
+        if res.transient_error:
+            return ProbeState.BILLING_UNKNOWN
+        if res.alias is None:
+            # No providers at all = never logged in; providers present but none Kimi = repointed.
+            return (ProbeState.NOT_LOGGED_IN if res.provider_count == 0
+                    else ProbeState.FAMILY_UNVERIFIED)
+        # Config resolution only proves intent; a real call proves the subscription still
+        # authenticates (an expired oauth token still leaves the provider entry in place). Runs
+        # from a neutral temp cwd: `kimi -p` is an agent, and a liveness check needs no repo
+        # context — don't hand it read access to whatever repo doctor ran in.
+        try:
+            r = subprocess.run(["kimi", "-p", "ok", "--output-format", "text", "-m", res.alias],
+                               capture_output=True, text=True, timeout=90,
+                               env=self._cli_env(), cwd=tempfile.gettempdir())
+        except subprocess.TimeoutExpired:
+            return ProbeState.BILLING_UNKNOWN
+        except OSError:
+            return ProbeState.NOT_INSTALLED
+        # The `/login` marker is the ONLY authentication signal — kimi prints it when the
+        # subscription is logged out or the oauth token expired. A bare nonzero exit without it is
+        # a transient (network/rate-limit/billing/internal error): report it as unknown, not as
+        # logout, so doctor never tells a logged-in user to re-login over a blip.
+        if "/login" in (r.stdout + r.stderr).lower():
+            return ProbeState.NOT_LOGGED_IN
+        if r.returncode != 0:
+            return ProbeState.BILLING_UNKNOWN
+        return ProbeState.READY if r.stdout.strip() else ProbeState.BILLING_UNKNOWN
+
+    def version(self) -> str | None:
+        """Best-effort CLI version string for provenance/replay; None if unavailable."""
+        if not shutil.which("kimi"):
+            return None
+        try:
+            r = subprocess.run(["kimi", "--version"], capture_output=True, text=True,
+                               timeout=20, env=self._cli_env())
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        return r.stdout.strip() or None
+
+    def invoke(self, prompt: str, spec: VoterSpec, wall_timeout: int = 150) -> CaptureResult:
+        """Reasoning goes to stderr and the answer to stdout, so capture stdout alone.
+
+        stdout is RENDERED, not raw: a "• " prefix on the first line, 2-space indented
+        continuations, and JSON often inside a ```json fence. That still parses today because
+        _extract_json scans for `{` and raw_decodes (skipping the bullet and fence) and
+        check_capture/strip_marker compare with .strip() (absorbing the indent) — but nothing
+        contracts kimi's renderer to stay parseable, so test_kimi_render_shape_still_parses pins
+        it. If it ever breaks, capture fails loudly as capture_failed rather than yielding a
+        wrong verdict.
+        """
+        res = self._resolve()
+        if res.alias is None:
+            # available() already gates this; belt-and-braces so an unverified family can never
+            # reach a panel even if a caller skips discovery.
+            return CaptureResult(False, "", CaptureFailureReason.EXIT_NONZERO)
+        cmd = ["kimi", "-p", prompt, "--output-format", "text", "-m", res.alias]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=wall_timeout,
+                               env=self._cli_env(), cwd=tempfile.gettempdir())
+        except subprocess.TimeoutExpired:
+            return CaptureResult(False, "", CaptureFailureReason.TIMEOUT)
+        except OSError:
+            return CaptureResult(False, "", CaptureFailureReason.EXIT_NONZERO)
+        return check_capture(r.stdout, r.returncode)
 
 
 class MockAdapter:
