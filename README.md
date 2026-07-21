@@ -126,7 +126,7 @@ Multiple persona/CLI challengers steelman then attack the artifact; a **cross-fa
 
 ## Backends — what you need
 
-Drives whatever subscription coding CLI you already have logged in — **Claude Code** (`claude`) or **OpenAI Codex** (`codex`), via their headless mode, on your existing subscription. No API keys, no per-token charges from this tool. It needs **at least one** logged-in CLI; `challenge-plans doctor` names each backend's state and the exact fix (install, or log in).
+Drives whatever subscription coding CLI you already have logged in — **Claude Code** (`claude`), **OpenAI Codex** (`codex`), or **Kimi Code** (`kimi`), via their headless mode, on your existing subscription. No API keys, no per-token charges from this tool. It needs **at least one** logged-in CLI; `challenge-plans doctor` names each backend's state, whether it's in your default panel, and the exact fix (install, or log in).
 
 How much you get depends on how many **different vendors** you have logged in:
 
@@ -135,7 +135,23 @@ How much you get depends on how many **different vendors** you have logged in:
 | **One** (claude *or* codex) | Multiple personas attack from different angles on your one subscription — still far more than asking your model once. | Findings stay **advisory**: nothing model-found can hard-gate, the verdict is capped at `discuss` (a clean run won't reach `approve`), and you get a `low_diversity` warning. The cross-family `[sev✓]` confirmation is **off**. A mechanical `--verify` check (tests/lint failing) *can* still hard-gate, since that's objective evidence, not a model vote. |
 | **Two** (claude *and* codex) | Everything above, **plus** a cross-family Verifier: one vendor's model must independently reproduce a high/critical objection with line-anchored evidence before it can hard-gate. | This is the headline — `[sev✓]` confirmation, real `request_changes`/`approve` verdicts. |
 
-So with one subscription it's a souped-up single-model review; the **cross-family verification that makes a finding hard-gate needs a second, different vendor** — either the other builtin CLI, or a backend you bring yourself:
+So with one subscription it's a souped-up single-model review; the **cross-family verification that makes a finding hard-gate needs a second, different vendor** — either another builtin CLI, or a backend you bring yourself.
+
+### Which families run — the default panel
+
+Having a family logged in doesn't mean it runs on every review. **Supported ≠ on-by-default**: the default panel is the verified low-friction pair **claude + gpt** (the `codex` CLI's family is `gpt`), and every other detected family — **kimi**, a BYO/gateway backend — is **opt-in**. That's deliberate: subscription quotas differ wildly (an entry Kimi tier has a small window; a gateway may bill per token), so a scarce family is never spent unless you ask for it.
+
+```bash
+challenge-plans doctor                    # each ready family is tagged `· default panel` or `· opt-in`
+challenge-plans run plan.md --families claude,kimi   # this run only: exactly these families
+challenge-plans config families claude,gpt,kimi      # set a persistent default panel
+challenge-plans config show                          # print the resolved default + config path
+```
+
+- `--families` wins for a single run; a persistent default lives in `~/.config/challenge-plans/config.yaml` (`config families …`, or edit by hand); with neither, the built-in **claude + gpt** default applies.
+- `--families` is **strict**: a name that isn't usable right now is a hard error, not a silent drop (so a typo can't quietly weaken your panel). An implicit default that collapses to one family says so on stderr rather than degrading silently.
+- The config stores **family names only** — never tokens or endpoints.
+- **Kimi is a verified builtin, not a BYO**: on a logged-in Kimi membership its family is confirmed from the CLI's own provider config and pinned per run, so it earns the builtin `[sev✓]` (unlike a `user_declared` BYO). It's just opt-in by default like any non-core family. If `kimi` is pointed at a non-Kimi provider its family can't be verified, so it's withheld rather than mislabelled.
 
 ### Bring your own backend (BYO)
 

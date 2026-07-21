@@ -12,11 +12,19 @@ import os
 import sys
 
 from . import __version__
+from . import config as _config
 from .adapters import ClaudeAdapter, CodexAdapter, KimiAdapter, ProbeState, discover_byo_adapters
 from .deliberation import weigh_options
 from .engine import run_challenge
 
 _ALL_ADAPTERS = [ClaudeAdapter, CodexAdapter, KimiAdapter]
+
+# The default adversary panel when neither --families nor a config default is given. These are
+# model-FAMILY names, not CLI names: the codex CLI's family is "gpt" (it runs GPT), so the default
+# is claude+gpt — the verified, low-friction pair. Every other detected family (kimi, BYO, gateways)
+# is opt-in so a scarce/quota-limited subscription is never spent unless the user asked. See
+# config.py. (`doctor` prints each backend's family, e.g. `codex-cli (gpt)`, so names are visible.)
+_BUILTIN_DEFAULT_FAMILIES = ["claude", "gpt"]
 
 
 def _discover_adapters() -> list:
@@ -33,6 +41,116 @@ def _discover_adapters() -> list:
         print(f"warning: {p}", file=sys.stderr)
     discovered.extend(a for a in byo if a.available())
     return discovered
+
+
+def _parse_families(raw: str) -> list[str]:
+    """Comma-separated family names -> normalised list (lower/strip/de-dupe, empties dropped)."""
+    seen: set = set()
+    out: list = []
+    for part in raw.split(","):
+        name = part.strip().lower()
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def _resolve_default_panel(fam_has_builtin: dict, configured: list | None) -> tuple:
+    """Resolve the family panel for the non-explicit paths → (families, is_builtin_default).
+
+    Shared by _select_adapters and doctor so the two can never disagree about what a bare `run`
+    would use. `fam_has_builtin` maps each AVAILABLE family → whether it has a verified-builtin
+    adapter. A configured panel wins if any of its families are available here; otherwise (unset,
+    cleared, or all-absent-here) we fall to the built-in default, which admits verified builtins
+    only — a BYO/gateway family declaring itself "claude"/"gpt" is never auto-run by default.
+    """
+    if configured:
+        chosen = [f for f in configured if f in fam_has_builtin]
+        if chosen:
+            return chosen, False
+    return [f for f in _BUILTIN_DEFAULT_FAMILIES if fam_has_builtin.get(f)], True
+
+
+def _select_adapters(discovered: list, requested: list | None) -> list:
+    """Narrow the discovered adapters to the active panel by family name.
+
+    Precedence: explicit --families (strict) > configured default (lenient) > built-in default.
+    The selection layer's whole point is that "supported" no longer means "runs by default", so a
+    shrunk panel is never silent: an explicit typo/unavailable request is a hard error, and an
+    implicit path that leaves a second family unused says so on stderr.
+    """
+    fam_to_adapters: dict = {}
+    for a in discovered:
+        fam_to_adapters.setdefault(a.model_family, []).append(a)
+    available = list(fam_to_adapters)
+
+    fam_has_builtin = {f: any(a.family_source == "builtin" for a in ads)
+                       for f, ads in fam_to_adapters.items()}
+
+    builtin_default = False  # the built-in default path restricts to verified builtins only
+    if requested is not None:
+        if not requested:
+            raise RuntimeError("--families was empty — name at least one family, e.g. "
+                               "`--families claude,gpt` (see `doctor` for what's usable).")
+        # Explicit request is strict: every name must be usable now, or stop. Kills the silent-typo
+        # footgun — `--families claude,kimee` must not quietly degrade to single-family.
+        unknown = [f for f in requested if f not in fam_to_adapters]
+        if unknown:
+            avail = ", ".join(sorted(available)) or "(none)"
+            raise RuntimeError(
+                f"--families: {', '.join(unknown)} not available now. Usable families: {avail}. "
+                f"Run `challenge-plans doctor` to see why a family is missing.")
+        chosen = requested
+    else:
+        configured = _config.read_default_families()
+        if configured:
+            # Config is cross-machine: a family set on another box may be absent here. Warn on the
+            # skipped ones, then let the shared resolver decide (it falls back to the built-in
+            # default when none of the configured families are available here).
+            missing = [f for f in configured if f not in fam_to_adapters]
+            if missing:
+                print(f"warning: configured families not available here, skipping: "
+                      f"{', '.join(missing)}", file=sys.stderr)
+        chosen, builtin_default = _resolve_default_panel(fam_has_builtin, configured)
+
+    selected = list(dict.fromkeys(chosen))
+    if not selected:
+        if available:
+            raise RuntimeError(
+                f"No default family available (looked for "
+                f"{', '.join(_BUILTIN_DEFAULT_FAMILIES)}). Detected: {', '.join(sorted(available))}."
+                f" Run with `--families {sorted(available)[0]}` or set a default via "
+                f"`challenge-plans config families …`.")
+        return []  # nothing available at all -> let run_challenge raise the standard "no adapters"
+    if builtin_default:  # only nudge when the user hasn't chosen — explicit --families or a
+        # deliberately-configured panel (even single-family) is intentional, so stay quiet there.
+        extra = [f for f in available if f not in selected]
+        if len(selected) < 2:
+            # Cross-family is the core value; degrading to single-family must be loud, not silent —
+            # whether or not a second family happens to be available (we still proceed either way).
+            msg = f"ℹ running single-family ({selected[0]})"
+            if extra:
+                msg += (f"; also available: {', '.join(sorted(extra))} — add with `--families "
+                        f"{selected[0]},{sorted(extra)[0]}` or `config families …` for cross-family "
+                        f"review.")
+            else:
+                msg += " — cross-family review needs a second logged-in family (see `doctor`)."
+            print(msg, file=sys.stderr)
+        elif extra:
+            print(f"ℹ {len(extra)} more family(ies) available ({', '.join(sorted(extra))}); "
+                  f"add with `challenge-plans config families …`.", file=sys.stderr)
+
+    def _adapters_for(fam: str) -> list:
+        ads = fam_to_adapters[fam]
+        if requested is not None:
+            return ads                    # explicit --families: every backend of the named family
+        # Config/default: prefer verified builtins so a configured/default family never silently
+        # pulls in a BYO/gateway of the same name; fall back to user_declared only if that family
+        # has no builtin at all (then it's the user's only source for that family).
+        builtins = [a for a in ads if a.family_source == "builtin"]
+        return builtins or ads
+
+    return [a for f in selected for a in _adapters_for(f)]
 
 
 # Default is advisory (does not block CI). Only --enforce maps
@@ -137,9 +255,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print("Deliberation runs via the `weigh` subcommand; `run --mode council` is reserved.",
               file=sys.stderr)
         return 2
+    req = _parse_families(args.families) if getattr(args, "families", None) is not None else None
     try:
+        adapters = _select_adapters(_discover_adapters(), req)
         manifest = run_challenge(
-            args.artifact, args.type, args.profile, _discover_adapters(),
+            args.artifact, args.type, args.profile, adapters,
             verify_cmds=getattr(args, "verify", None),
             record_backends=bool(getattr(args, "save", None)))
     except NotImplementedError as e:
@@ -212,8 +332,10 @@ def _cmd_weigh(args: argparse.Namespace) -> int:
         print("Options file must contain `question` and `options: [{id, text}]` (≥2 options).",
               file=sys.stderr)
         return 2
+    req = _parse_families(args.families) if getattr(args, "families", None) is not None else None
     try:
-        m = weigh_options(spec["question"], spec["options"], _discover_adapters(), args.profile)
+        adapters = _select_adapters(_discover_adapters(), req)
+        m = weigh_options(spec["question"], spec["options"], adapters, args.profile)
     except (RuntimeError, ValueError) as e:
         print(str(e), file=sys.stderr)
         return 2
@@ -245,19 +367,76 @@ def _remediation(adapter, state: ProbeState) -> str:
     return ""
 
 
+def _cmd_config(args: argparse.Namespace) -> int:
+    if args.config_cmd == "families":
+        fams = _parse_families(args.value)
+        try:
+            path = _config.write_default_families(fams)
+        except OSError as e:
+            print(f"error: cannot write config: {e}", file=sys.stderr)
+            return 2
+        shown = ", ".join(fams) if fams else "(empty)"
+        print(f"wrote default panel [{shown}] to {path}")
+        return 0
+    # show
+    path = _config.config_path()
+    exists = "" if path.exists() else "  (not created yet)"
+    print(f"config file: {path}{exists}")
+    fams = _config.read_default_families()
+    if not fams:  # None (unset) or [] (cleared) both fall back to the built-in default
+        state = "(unset)" if fams is None else "(cleared)"
+        print(f"default panel: {state} → built-in default: "
+              f"{', '.join(_BUILTIN_DEFAULT_FAMILIES)} (verified builtins only)")
+    else:
+        print(f"default panel: {', '.join(fams)}")
+    print("everything else detected by `doctor` is opt-in: add with `config families …` "
+          "or per-run `--families`.")
+    return 0
+
+
 def _cmd_doctor(args: argparse.Namespace) -> int:
-    any_ready = False
+    configured = _config.read_default_families()
     byo, problems = discover_byo_adapters()
-    for a in [cls() for cls in _ALL_ADAPTERS] + byo:
-        state = a.probe()
-        any_ready = any_ready or state == ProbeState.READY
+    # Two passes so doctor resolves the panel the SAME way a run does (shared _resolve_default_panel
+    # over the families actually ready here) — otherwise doctor and run drift on cross-machine config.
+    probed = [(a, a.probe()) for a in [cls() for cls in _ALL_ADAPTERS] + byo]
+    any_ready = any(s == ProbeState.READY for _, s in probed)
+    fam_has_builtin: dict = {}
+    for a, s in probed:
+        if s == ProbeState.READY:
+            fam_has_builtin[a.model_family] = (fam_has_builtin.get(a.model_family, False)
+                                               or a.family_source == "builtin")
+    panel_fams, _ = _resolve_default_panel(fam_has_builtin, configured)
+    panel_fams = set(panel_fams)
+
+    def _in_panel(a) -> bool:
+        # Mirror _select_adapters._adapters_for: within a selected family, a builtin wins; a
+        # user_declared adapter is in the panel only if that family has no builtin at all.
+        if a.model_family not in panel_fams:
+            return False
+        if fam_has_builtin.get(a.model_family):
+            return a.family_source == "builtin"
+        return True
+
+    panel_ready = False
+    for a, state in probed:
         declared = ", user-declared family" if a.family_source == "user_declared" else ""
         line = f"{a.backend} ({a.model_family}{declared}): {state.value}"
+        if state == ProbeState.READY:
+            in_panel = _in_panel(a)
+            panel_ready = panel_ready or in_panel
+            line += " · default panel" if in_panel else " · opt-in"
         if state != ProbeState.READY:
             hint = _remediation(a, state)
             if hint:
                 line += f"  → {hint}"
         print(line)
+    if any_ready and not panel_ready:
+        # Usable backends exist but none is in the default panel: a bare `run` would error, so say
+        # how to proceed rather than letting doctor look green while runs fail.
+        print("\n⚠ no default-panel family is ready — a plain `run` will have nothing to use. "
+              "Pass `--families <a ready family above>` or set a default with "
+              "`challenge-plans config families …`.")
     for p in problems:
         print(f"misconfigured: {p}")
     if not any_ready:
@@ -285,6 +464,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="challenge (adversarial); council reserved — deliberation runs via `weigh`")
     run.add_argument("--profile", choices=["fast", "standard", "deep"], default="standard",
                      help="panel size / depth")
+    run.add_argument("--families", metavar="A,B", default=None,
+                     help="comma-separated family names to use as the panel, overriding the config "
+                          "default (e.g. `--families claude,kimi`). Every name must be usable now — "
+                          "see `doctor`. Omit to use your configured / built-in default panel")
     run.add_argument("--sink", choices=["stdout", "markdown"],
                      default="stdout", help="output format (github-pr-comment pending)")
     run.add_argument("--enforce", action="store_true",
@@ -309,6 +492,9 @@ def build_parser() -> argparse.ArgumentParser:
     weigh = sub.add_parser("weigh", help="deliberation: multiple agents vote across options (weigh-options)")
     weigh.add_argument("options_file", help="YAML/JSON file: {question, options: [{id, text}]}")
     weigh.add_argument("--profile", choices=["fast", "standard", "deep"], default="standard")
+    weigh.add_argument("--families", metavar="A,B", default=None,
+                       help="comma-separated family names to use as the panel, overriding the "
+                            "config default. Every name must be usable now — see `doctor`")
     weigh.add_argument("--sink", choices=["stdout", "markdown"], default="stdout")
     weigh.add_argument("--enforce", action="store_true",
                        help="exit non-zero when recommendation is discuss/inconclusive; 0 by default")
@@ -319,6 +505,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="check which backend CLIs are logged in / usable")
     doctor.set_defaults(func=_cmd_doctor)
+
+    cfg = sub.add_parser("config", help="view/set the default adversary panel (persistent config)")
+    cfg_sub = cfg.add_subparsers(dest="config_cmd", required=True)
+    cfg_show = cfg_sub.add_parser("show", help="print the resolved default panel and config path")
+    cfg_show.set_defaults(func=_cmd_config)
+    cfg_fam = cfg_sub.add_parser("families",
+                                 help="set the default panel, e.g. `config families claude,codex`")
+    cfg_fam.add_argument("value", help="comma-separated family names (empty string clears it)")
+    cfg_fam.set_defaults(func=_cmd_config)
 
     return p
 

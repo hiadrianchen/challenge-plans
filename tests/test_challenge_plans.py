@@ -733,9 +733,11 @@ def test_verify_failure_breaks_ci_only_under_enforce(tmp_path, monkeypatch):
     text = "---\nartifact_type: spec\ntitle: t\nintent: i\nacceptance_criteria: [a]\nnon_goals: [n]\n---\nExport user CSV\nGenerate asynchronously\nFilter by date\n"
     p = mk(tmp_path, text)
     # fast = single persona so the one mock voter completes the panel (single family -> discuss).
-    assert cli.main(["run", p, "--type", "spec", "--profile", "fast", "--enforce"]) == 0          # discuss passes enforce
-    assert cli.main(["run", p, "--type", "spec", "--profile", "fast", "--verify", "exit 1"]) == 0  # advisory: verdict only
-    assert cli.main(["run", p, "--type", "spec", "--profile", "fast", "--verify", "exit 1", "--enforce"]) == 1  # CI breaks
+    # --families mock opts the structural mock family into the panel (it is not a default family).
+    base = ["run", p, "--type", "spec", "--profile", "fast", "--families", "mock"]
+    assert cli.main(base + ["--enforce"]) == 0                          # discuss passes enforce
+    assert cli.main(base + ["--verify", "exit 1"]) == 0                 # advisory: verdict only
+    assert cli.main(base + ["--verify", "exit 1", "--enforce"]) == 1    # CI breaks
 
 
 def test_verify_errored_is_advisory_not_gate(tmp_path):
@@ -1485,3 +1487,342 @@ def test_kimi_family_is_builtin_and_reaches_doctor(monkeypatch):
     hint = _remediation(KimiAdapter(), ProbeState.FAMILY_UNVERIFIED)
     assert "provider" in hint.lower() and hint != ""
     assert "/login" in _remediation(KimiAdapter(), ProbeState.NOT_LOGGED_IN)
+
+
+# ── 0.2.0 selection layer: "supported" no longer means "runs by default" ──────────────
+# The panel is chosen by family name with precedence --families > config > built-in default, and
+# a shrunk panel is NEVER silent (the whole point: a scarce family like kimi must not auto-run,
+# but degrading to single-family or an empty panel must be announced/erroring, not quiet).
+from challenge_plans import cli as _cli  # noqa: E402
+from challenge_plans import config as _cfg  # noqa: E402
+
+
+def _fam(name):
+    """A ready structural adapter tagged with a given model family."""
+    return MockAdapter({}, model_family=name)
+
+
+def _iso_config(monkeypatch, tmp_path, contents=None):
+    """Point config at an isolated temp file; optionally seed contents. Returns the path."""
+    p = tmp_path / "config.yaml"
+    if contents is not None:
+        p.write_text(contents, encoding="utf-8")
+    monkeypatch.setenv("CHALLENGE_PLANS_CONFIG", str(p))
+    return p
+
+
+def test_parse_families_normalises(monkeypatch):
+    assert _cli._parse_families(" Claude , GPT ,claude,, ") == ["claude", "gpt"]
+    assert _cli._parse_families("") == []
+
+
+def test_default_panel_is_claude_and_gpt_not_cli_names(monkeypatch, tmp_path):
+    # Regression pin for the family-vs-CLI-name trap: codex's family is "gpt", so the default must
+    # be claude+gpt or codex silently drops out of the default panel.
+    _iso_config(monkeypatch, tmp_path)
+    assert _cli._BUILTIN_DEFAULT_FAMILIES == ["claude", "gpt"]
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt")], None)
+    assert sorted(a.model_family for a in got) == ["claude", "gpt"]
+
+
+def test_scarce_family_is_opt_in_by_default(monkeypatch, tmp_path, capsys):
+    # kimi is available but NOT selected by default; its availability is announced, not spent.
+    _iso_config(monkeypatch, tmp_path)
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt"), _fam("kimi")], None)
+    assert sorted(a.model_family for a in got) == ["claude", "gpt"]
+    err = capsys.readouterr().err
+    assert "kimi" in err and "config families" in err
+
+
+def test_no_nag_when_default_equals_available(monkeypatch, tmp_path, capsys):
+    _iso_config(monkeypatch, tmp_path)
+    _cli._select_adapters([_fam("claude"), _fam("gpt")], None)
+    assert capsys.readouterr().err == ""
+
+
+def test_config_default_overrides_builtin(monkeypatch, tmp_path):
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: [claude, kimi]\n")
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt"), _fam("kimi")], None)
+    assert sorted(a.model_family for a in got) == ["claude", "kimi"]  # gpt excluded, kimi opted in
+
+
+def test_config_family_absent_here_is_skipped_with_warning(monkeypatch, tmp_path, capsys):
+    # Config is cross-machine: a family configured elsewhere but missing here is skipped, not fatal.
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: [claude, kimi]\n")
+    got = _cli._select_adapters([_fam("claude")], None)   # kimi not available on this box
+    assert [a.model_family for a in got] == ["claude"]
+    assert "kimi" in capsys.readouterr().err
+
+
+def test_explicit_families_is_strict_typo_errors(monkeypatch, tmp_path):
+    # The silent-typo footgun the decision review flagged: an explicit unavailable/misspelled family
+    # must hard-error, never quietly run a weaker panel.
+    _iso_config(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError) as e:
+        _cli._select_adapters([_fam("claude"), _fam("gpt")], ["claude", "kimee"])
+    assert "kimee" in str(e.value) and "claude, gpt" in str(e.value)
+
+
+def test_explicit_families_suppresses_nag(monkeypatch, tmp_path, capsys):
+    # An explicit --families is deliberate: no "more available" nudge even with extras present.
+    _iso_config(monkeypatch, tmp_path)
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt"), _fam("kimi")], ["claude"])
+    assert [a.model_family for a in got] == ["claude"]
+    assert capsys.readouterr().err == ""
+
+
+def test_single_family_degradation_is_loud(monkeypatch, tmp_path, capsys):
+    # Only claude of the default pair is here, but kimi is available: proceed single-family, but SAY
+    # cross-family is one flag away (never silently drop to single-family).
+    _iso_config(monkeypatch, tmp_path)
+    got = _cli._select_adapters([_fam("claude"), _fam("kimi")], None)
+    assert [a.model_family for a in got] == ["claude"]
+    err = capsys.readouterr().err
+    assert "single-family" in err and "kimi" in err
+
+
+def test_empty_default_with_families_available_errors(monkeypatch, tmp_path):
+    # Neither default family present but others are: error naming them, never silently recruit a
+    # scarce family and never silently run nothing.
+    _iso_config(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError) as e:
+        _cli._select_adapters([_fam("kimi")], None)
+    assert "kimi" in str(e.value) and "--families" in str(e.value)
+
+
+def test_nothing_available_returns_empty(monkeypatch, tmp_path):
+    # No adapters at all -> defer to run_challenge's existing "no adapters" error, don't raise here.
+    _iso_config(monkeypatch, tmp_path)
+    assert _cli._select_adapters([], None) == []
+
+
+def test_config_roundtrip_and_clear(monkeypatch, tmp_path):
+    _iso_config(monkeypatch, tmp_path)
+    assert _cfg.read_default_families() is None            # unset
+    _cfg.write_default_families(["claude", "kimi"])
+    assert _cfg.read_default_families() == ["claude", "kimi"]
+    _cfg.write_default_families([])                        # explicit clear is distinct from unset
+    assert _cfg.read_default_families() == []
+
+
+def test_config_malformed_degrades_to_default(monkeypatch, tmp_path, capsys):
+    _iso_config(monkeypatch, tmp_path, "panel: [this is not the right shape\n")
+    assert _cfg.read_default_families() is None            # malformed -> None -> built-in default
+    assert "not valid YAML" in capsys.readouterr().err
+
+
+def test_config_path_honours_env_then_xdg(monkeypatch, tmp_path):
+    monkeypatch.setenv("CHALLENGE_PLANS_CONFIG", str(tmp_path / "x.yaml"))
+    assert _cfg.config_path() == tmp_path / "x.yaml"
+    monkeypatch.delenv("CHALLENGE_PLANS_CONFIG")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert _cfg.config_path() == tmp_path / "challenge-plans" / "config.yaml"
+
+
+def test_config_stores_only_names_no_secrets(monkeypatch, tmp_path):
+    # The tool's first persistent state must never become a secret sink: names only.
+    p = _iso_config(monkeypatch, tmp_path)
+    _cfg.write_default_families(["claude", "gpt"])
+    body = p.read_text(encoding="utf-8")
+    assert "families" in body and "token" not in body.lower() and "http" not in body.lower()
+
+
+# ── selection layer, round-2 hardening (from --type diff dogfood on the layer itself) ─────
+def _byo_fam(name):
+    """A ready adapter whose family is user_declared (mimics a BYO/gateway declaring `name`)."""
+    return MockAdapter({}, model_family=name, family_source="user_declared")
+
+
+def test_byo_declared_family_is_not_in_builtin_default(monkeypatch, tmp_path, capsys):
+    # A BYO/gateway declaring itself "claude" must NOT auto-run in the built-in default — only
+    # verified builtins do; the user_declared one is opt-in like any scarce/paid family.
+    _iso_config(monkeypatch, tmp_path)
+    got = _cli._select_adapters([_fam("claude"), _byo_fam("gpt")], None)  # gpt only via BYO
+    assert [a.model_family for a in got] == ["claude"]                    # BYO-gpt excluded
+    assert "single-family" in capsys.readouterr().err                    # and the drop is announced
+
+
+def test_explicit_families_still_admits_declared(monkeypatch, tmp_path):
+    # Opt-in overrides the builtin-only rule: if the user explicitly names a user_declared family,
+    # honour it (they opted in), unlike the silent default.
+    _iso_config(monkeypatch, tmp_path)
+    got = _cli._select_adapters([_fam("claude"), _byo_fam("gpt")], ["claude", "gpt"])
+    assert sorted(a.model_family for a in got) == ["claude", "gpt"]
+
+
+def test_cleared_config_falls_back_to_builtin_default(monkeypatch, tmp_path):
+    # Explicit-clear [] is treated as unset -> built-in default, so run and doctor agree (it must
+    # NOT error when default families are present).
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: []\n")
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt"), _fam("kimi")], None)
+    assert sorted(a.model_family for a in got) == ["claude", "gpt"]
+
+
+def test_single_family_no_extra_still_announced(monkeypatch, tmp_path, capsys):
+    # Even with no second family to suggest, a single-family default must be announced (the default
+    # implies cross-family; a silent collapse hides that the run is advisory-only).
+    _iso_config(monkeypatch, tmp_path)
+    got = _cli._select_adapters([_fam("claude")], None)
+    assert [a.model_family for a in got] == ["claude"]
+    assert "single-family" in capsys.readouterr().err
+
+
+def test_strict_families_typo_is_exit_2_not_traceback(tmp_path, monkeypatch):
+    # End-to-end: an unavailable --families name surfaces as a friendly exit 2, not a traceback.
+    from challenge_plans import cli
+    monkeypatch.setattr(cli, "_discover_adapters", lambda: [_fam("claude"), _fam("gpt")])
+    p = mk(tmp_path, "# spec\nL2 a\nL3 b\n")
+    assert cli.main(["run", p, "--type", "spec", "--profile", "fast", "--families", "kimee"]) == 2
+
+
+# ── selection layer, round-3 hardening (from --type diff dogfood round 2) ─────────────────
+def test_config_fully_absent_here_falls_back_to_default(monkeypatch, tmp_path, capsys):
+    # A cross-machine config listing only families absent here must NOT hard-error: skip with a
+    # warning and fall back to the built-in default (contract = "narrow the panel", not "brick it").
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: [kimi]\n")
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt")], None)  # no kimi here
+    assert sorted(a.model_family for a in got) == ["claude", "gpt"]
+    assert "kimi" in capsys.readouterr().err
+
+
+def test_malformed_config_shape_warns_not_silent(monkeypatch, tmp_path, capsys):
+    # `families: claude` (a string, not a list) is a plausible mistype — warn and fall back, never
+    # silently ignore a config the user believes is active.
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: claude\n")
+    assert _cfg.read_default_families() is None
+    assert "must be a list" in capsys.readouterr().err
+
+
+def test_configured_single_family_is_not_nagged(monkeypatch, tmp_path, capsys):
+    # A deliberately-configured single-family panel is intentional; do not nag it as an accidental
+    # degradation on every run (the nag is for the built-in-default path only).
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: [claude]\n")
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt"), _fam("kimi")], None)
+    assert [a.model_family for a in got] == ["claude"]
+    assert capsys.readouterr().err == ""
+
+
+def _patch_doctor(monkeypatch, ready_families, byo=None):
+    from challenge_plans import cli
+    monkeypatch.setattr(cli, "_ALL_ADAPTERS", [(lambda f=f: (lambda: _fam(f)))() for f in ready_families])
+    monkeypatch.setattr(cli, "discover_byo_adapters", lambda: (byo or [], []))
+
+
+def test_doctor_warns_when_no_panel_family_ready(monkeypatch, tmp_path, capsys):
+    # Only an opt-in family (kimi) is ready: doctor must not look green while a bare `run` would
+    # fail — it warns and explains how to proceed.
+    from challenge_plans import cli
+    _iso_config(monkeypatch, tmp_path)
+    _patch_doctor(monkeypatch, ["kimi"])
+    rc = cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert rc == 0 and "no default-panel family is ready" in out and "· opt-in" in out
+
+
+def test_doctor_labels_default_panel_vs_optin(monkeypatch, tmp_path, capsys):
+    from challenge_plans import cli
+    _iso_config(monkeypatch, tmp_path)
+    _patch_doctor(monkeypatch, ["claude", "kimi"])
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "(claude): ready · default panel" in out and "(kimi): ready · opt-in" in out
+
+
+def test_config_write_error_is_friendly_not_traceback(monkeypatch, tmp_path, capsys):
+    from challenge_plans import cli
+    def _boom(_):
+        raise OSError("read-only file system")
+    monkeypatch.setattr(cli._config, "write_default_families", _boom)
+    assert cli.main(["config", "families", "claude,gpt"]) == 2
+    assert "cannot write config" in capsys.readouterr().err
+
+
+def test_cmd_config_show_and_set_roundtrip(monkeypatch, tmp_path, capsys):
+    from challenge_plans import cli
+    _iso_config(monkeypatch, tmp_path)
+    assert cli.main(["config", "families", "claude,kimi"]) == 0
+    assert "wrote default panel" in capsys.readouterr().out
+    assert cli.main(["config", "show"]) == 0
+    assert "claude, kimi" in capsys.readouterr().out
+
+
+# ── selection layer, round-4 hardening (from --type diff dogfood round 3) ─────────────────
+def test_doctor_and_run_agree_on_absent_configured_family(monkeypatch, tmp_path, capsys):
+    # config lists only kimi, but this box has claude+gpt: run falls back to the built-in default,
+    # and doctor (sharing _resolve_default_panel) must label claude+gpt as the panel too — not warn
+    # "no default-panel family ready" while a real run would succeed.
+    from challenge_plans import cli
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: [kimi]\n")
+    # run: falls back to claude+gpt
+    got = _cli._select_adapters([_fam("claude"), _fam("gpt")], None)
+    assert sorted(a.model_family for a in got) == ["claude", "gpt"]
+    # doctor: same resolution -> claude+gpt are the panel, no "nothing ready" warning
+    _patch_doctor(monkeypatch, ["claude", "gpt"])
+    cli.main(["doctor"])
+    out = capsys.readouterr().out
+    assert "(claude): ready · default panel" in out and "(gpt): ready · default panel" in out
+    assert "no default-panel family is ready" not in out
+
+
+def test_non_utf8_config_is_ignored_with_warning(monkeypatch, tmp_path, capsys):
+    p = _iso_config(monkeypatch, tmp_path)
+    p.write_bytes(b"panel:\n  families: [\xff\xfe not utf8]\n")
+    assert _cfg.read_default_families() is None
+    assert "not UTF-8" in capsys.readouterr().err
+
+
+def test_config_write_is_atomic_and_preserves_on_reparse(monkeypatch, tmp_path):
+    # After a write the file round-trips cleanly (atomic swap left a complete, valid file).
+    _iso_config(monkeypatch, tmp_path)
+    _cfg.write_default_families(["claude", "gpt"])
+    _cfg.write_default_families(["kimi"])                 # overwrite
+    assert _cfg.read_default_families() == ["kimi"]
+    # no stray temp files left in the config dir
+    assert not list((tmp_path).glob(".config-*.tmp"))
+
+
+def test_weigh_families_typo_is_exit_2(tmp_path, monkeypatch):
+    # weigh shares the selection layer: an unavailable --families name is a friendly exit 2 there too.
+    from challenge_plans import cli
+    monkeypatch.setattr(cli, "_discover_adapters", lambda: [_fam("claude"), _fam("gpt")])
+    opt = tmp_path / "o.yaml"
+    opt.write_text("question: q?\noptions:\n  - {id: a, text: aa}\n  - {id: b, text: bb}\n",
+                   encoding="utf-8")
+    assert cli.main(["weigh", str(opt), "--profile", "fast", "--families", "kimee"]) == 2
+
+
+# ── selection layer, round-5 hardening (from --type diff dogfood round 4) ─────────────────
+def test_config_family_prefers_builtin_over_same_name_byo(monkeypatch, tmp_path):
+    # A configured/default family must NOT silently pull in a BYO of the same name alongside the
+    # verified one — prefer the builtin; the BYO stays opt-in via explicit --families.
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: [claude]\n")
+    got = _cli._select_adapters([_fam("claude"), _byo_fam("claude")], None)
+    assert [a.family_source for a in got] == ["builtin"]          # only the verified claude
+    # explicit --families claude, however, takes every backend of the named family (opt-in).
+    got2 = _cli._select_adapters([_fam("claude"), _byo_fam("claude")], ["claude"])
+    assert sorted(a.family_source for a in got2) == ["builtin", "user_declared"]
+
+
+def test_config_family_falls_back_to_byo_when_no_builtin(monkeypatch, tmp_path):
+    # If a configured family's ONLY backend is a BYO, use it (it's the user's sole source there).
+    _iso_config(monkeypatch, tmp_path, "panel:\n  families: [glm]\n")
+    got = _cli._select_adapters([_fam("claude"), _byo_fam("glm")], None)
+    assert [a.model_family for a in got] == ["glm"]
+
+
+def test_explicit_empty_families_is_clear_error(monkeypatch, tmp_path):
+    _iso_config(monkeypatch, tmp_path)
+    with pytest.raises(RuntimeError) as e:
+        _cli._select_adapters([_fam("claude"), _fam("gpt")], [])
+    assert "was empty" in str(e.value)
+
+
+def test_config_show_unset_and_cleared(monkeypatch, tmp_path, capsys):
+    from challenge_plans import cli
+    _iso_config(monkeypatch, tmp_path)
+    cli.main(["config", "show"])                          # unset
+    assert "(unset)" in capsys.readouterr().out
+    cli.main(["config", "families", ""])                 # clear
+    capsys.readouterr()
+    cli.main(["config", "show"])                          # cleared
+    assert "(cleared)" in capsys.readouterr().out
